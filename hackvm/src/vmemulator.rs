@@ -266,9 +266,13 @@ impl VMEmulator {
         self.get_segment_mut(to_segment)[to_index as usize] = value;
         Ok(())
     }
-    fn exec_internal(&mut self, internal_id: usize, num_args: usize) -> Result<(), String> {
-        match internal_id {
-            0 => {
+    fn exec_internal(
+        &mut self,
+        internal_func_ref: FunctionRef,
+        num_args: usize,
+    ) -> Result<(), String> {
+        match internal_func_ref {
+            FunctionRef::Internal(0) => {
                 // Math.divide
                 if num_args != 2 {
                     panic!(
@@ -284,7 +288,7 @@ impl VMEmulator {
                     .map_err(|e| format!("exec_internal failed: {}", e))?;
                 self.push_stack(b / a);
             }
-            1 => {
+            FunctionRef::Internal(1) => {
                 // Math.multiply
                 if num_args != 2 {
                     panic!(
@@ -301,7 +305,7 @@ impl VMEmulator {
                 self.push_stack(b * a);
             }
             _ => {
-                panic!("Unknown internal function {}", internal_id);
+                panic!("Unknown internal function {:?}", internal_func_ref);
             }
         };
         Ok(())
@@ -419,10 +423,10 @@ impl VMEmulator {
         }
     }
 
-    pub fn get_internals() -> HashMap<String, usize> {
-        let mut internals: HashMap<String, usize> = HashMap::new();
-        internals.insert("Math.divide".to_string(), 0);
-        internals.insert("Math.multiply".to_string(), 1);
+    pub fn get_internals() -> HashMap<String, FunctionRef> {
+        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
+        internals.insert("Math.divide".to_string(), FunctionRef::new_internal(0));
+        internals.insert("Math.multiply".to_string(), FunctionRef::new_internal(1));
         internals
     }
 
@@ -452,14 +456,14 @@ impl VMEmulator {
                 self.frame_mut().index += 1;
             }
             Command::Call(function_ref, num_args) => match function_ref {
-                FunctionRef::Internal(internal_id) => {
-                    self.exec_internal(internal_id, num_args as usize)
-                        .map_err(|e| format!("failed step {:?}: {}", command, e))?;
-                    self.frame_mut().index += 1;
-                }
                 FunctionRef::InCode(in_code_func_ref) => {
                     self.exec_call(in_code_func_ref, num_args as usize)
                         .map_err(|e| format!("failed step {:?}: {}", command, e))?;
+                }
+                other_ref => {
+                    self.exec_internal(other_ref, num_args as usize)
+                        .map_err(|e| format!("failed step {:?}: {}", command, e))?;
+                    self.frame_mut().index += 1;
                 }
             },
             Command::Return => {

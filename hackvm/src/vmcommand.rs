@@ -331,7 +331,7 @@ impl VMProgram {
     }
     pub fn with_internals(
         files: &Vec<(&str, &str)>,
-        internal_funcs: Option<HashMap<String, usize>>,
+        internal_funcs: Option<HashMap<String, FunctionRef>>,
     ) -> Result<VMProgram, String> {
         let tokenized_program = TokenizedProgram::from_files(files)
             .map_err(|e| format!("Failed to create VMProgram: {}", e))?;
@@ -341,11 +341,8 @@ impl VMProgram {
         let mut warnings: Vec<Box<str>> = Vec::new();
         // tokenize files and build function table
         if let Some(internal_funcs) = internal_funcs {
-            for (func_name, internal_id) in internal_funcs.iter() {
-                function_table.insert(
-                    func_name.to_string(),
-                    FunctionRef::new_internal(*internal_id),
-                );
+            for (func_name, internal_func_ref) in internal_funcs.iter() {
+                function_table.insert(func_name.to_string(), *internal_func_ref);
             }
         }
 
@@ -552,6 +549,7 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -566,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_with_internals() {
-        let internals: HashMap<String, usize> = HashMap::new();
+        let internals: HashMap<String, FunctionRef> = HashMap::new();
         let files = vec![(
             "Sys.vm",
             "
@@ -588,8 +586,8 @@ mod tests {
             "Expected call to missing function to use another function ref..."
         );
 
-        let mut internals: HashMap<String, usize> = HashMap::new();
-        internals.insert("Sys.add".to_string(), 0);
+        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
+        internals.insert("Sys.add".to_string(), FunctionRef::new_internal(0));
         let program = VMProgram::with_internals(&files, Some(internals)).unwrap();
         assert_eq!(
             program.warnings.len(),
@@ -618,8 +616,8 @@ mod tests {
             return
             ",
         )];
-        let mut internals: HashMap<String, usize> = HashMap::new();
-        internals.insert("Sys.add".to_string(), 0);
+        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
+        internals.insert("Sys.add".to_string(), FunctionRef::new_internal(0));
         let program = VMProgram::with_internals(&files, Some(internals)).unwrap();
         assert_eq!(
             program.warnings.len(),

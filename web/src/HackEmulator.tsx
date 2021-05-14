@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Row from "react-bootstrap/Row";
 import Col from "react-bootstrap/Col";
 import Form from "react-bootstrap/Form";
@@ -11,10 +11,11 @@ import type RustHackMachine from "./RustHackMachine";
 
 type HackEmulatorProps = {
   urls: string[];
+  config: { speed: number };
   children?: React.ReactNode;
 };
-const HackEmulator = ({ urls, children }: HackEmulatorProps) => {
-  const [speed, setSpeed] = useState(20000);
+const HackEmulator = ({ urls, config, children }: HackEmulatorProps) => {
+  const [speed, setSpeed] = useState(config.speed);
   const [numInstructions, setNumInstructions] = useState(0);
 
   const { loading, canvasRef, paused, setPaused, reset } = useHackMachine(
@@ -22,11 +23,16 @@ const HackEmulator = ({ urls, children }: HackEmulatorProps) => {
     {
       paused: false,
       speed,
-      onTick: useCallback((machine: RustHackMachine, elapsedTimeMs: number) => {
+      onTick: useCallback((machine: RustHackMachine) => {
         setNumInstructions(machine.numCycles / 1000);
       }, []),
     }
   );
+
+  useEffect(() => {
+    setSpeed(config.speed);
+    setNumInstructions(0);
+  }, [urls, config]);
 
   const togglePause = () => setPaused(!paused);
 
@@ -80,7 +86,7 @@ const HackEmulator = ({ urls, children }: HackEmulatorProps) => {
       </Col>
       <Col md={4}>
         {children}
-        <Accordion>
+        <Accordion defaultActiveKey="0">
           <Card>
             <Accordion.Toggle as={Card.Header} eventKey="0">
               Configuration

@@ -11,21 +11,23 @@ function EmulatorPage() {
 
   const demo = demos[demoId];
   const urls = demo ? [...demo.files, ...OSFiles] : [];
+  const defaultConfig = { speed: 20000 };
+  const config =
+    demo && demo.config ? { ...defaultConfig, ...demo.config } : defaultConfig;
 
   return (
     <Container>
       <Row>
         <Col md={12}>
-          <strong className="fs-5">{demo.title}</strong>
-          <p>by {demo.author}</p>
+          <strong className="fs-5">{demo.title}</strong> - {demo.description}{" "}
+          <a href={demo.projectUrl} target="_blank" rel="noopener noreferrer">
+            [source code]
+          </a>
+          <p>by {demo.author} </p>
         </Col>
       </Row>
-      <HackEmulator urls={urls}>
+      <HackEmulator urls={urls} config={config}>
         {demo.instructions && <p>{demo.instructions}</p>}
-        <p>
-          This demo program for the hack platform was written by {demo.author}.
-          You can find the code for it <a href={demo.projectUrl}>here</a>.
-        </p>
       </HackEmulator>
     </Container>
   );

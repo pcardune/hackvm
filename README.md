@@ -4,6 +4,8 @@ This repository contains a reimplementation of the hack virtual machine describe
 in the [nand2tetris online class](https://www.nand2tetris.org/) which runs in a
 web browser.
 
+[Try it out here](https://pcardune.github.io/hackvm/index.html#/)
+
 ## Directory Layout
 
 - **hackvm** - contains the virtual machine code, which is implemented in Rust and compiles to WebAssembly

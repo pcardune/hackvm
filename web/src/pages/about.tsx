@@ -34,9 +34,9 @@ function AboutPage() {
           </p>
           <p>
             In an effort to continue the fun, and learn some more stuff, I
-            decided to recreate the emulator programs that come with the book in
-            a way that will run inside a web browser, without having to download
-            anything. The emulators are written in{" "}
+            decided to recreate the virtual machine emulator program that comes
+            with the book in a way that will run inside a web browser, without
+            having to download anything. The emulator is written in{" "}
             <a
               href="https://www.rust-lang.org/"
               target="_blank"
@@ -55,14 +55,30 @@ function AboutPage() {
             , with some javascript glue code to handle canvas rendering and
             keyboard events.
           </p>
-          <p>Checkout some of the demos:</p>
+          <p>
+            Checkout some of the demo programs (which other people wrote)
+            running on the emulator:
+          </p>
           <ul>
             {Object.keys(demos).map((demoId) => (
               <li key={demoId}>
-                <Link to={`/emulator/${demoId}`}>{demos[demoId].title}</Link>
+                <Link to={`/emulator/${demoId}`}>{demos[demoId].title}</Link> -{" "}
+                {demos[demoId].description} By {demos[demoId].author}.
               </li>
             ))}
           </ul>
+          <p>
+            All the source code for the virtual machine implementation and this
+            website is available{" "}
+            <a
+              href="https://github.com/pcardune/hackvm"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              on github
+            </a>
+            .
+          </p>
         </Col>
       </Row>
     </Container>

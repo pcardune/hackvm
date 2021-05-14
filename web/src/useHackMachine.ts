@@ -21,6 +21,8 @@ export default function useHackMachine(
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    setPaused(initPaused);
+    setMachine(undefined);
     setLoading(true);
     const context = canvasRef.current?.getContext("2d");
     context &&
@@ -49,7 +51,7 @@ export default function useHackMachine(
     if (onTick) {
       onTickInterval = setInterval(
         () => onTick(machine, new Date().getTime() - startTime),
-        1000
+        1000 / 30
       );
     }
     return () => {

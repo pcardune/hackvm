@@ -11,19 +11,24 @@ export const OSFiles = [
 
 type Demo = {
   title: string;
+  description?: string;
   files: string[];
   projectUrl: string;
   author: string;
   ticksPerCycle?: number;
   instructions?: string;
+  config?: { speed?: number };
 };
 
 const demos: Record<string, Demo> = {
   pong: {
     title: "Pong",
+    description:
+      "The classic game of pong that's part of the Nand2Tetris course.",
     author: "Noam Nisan and Shimon Schocken (creators of Nand2Tetris)",
     projectUrl: "https://www.nand2tetris.org/",
     instructions: "Use the arrow keys to move the paddle.",
+    config: { speed: 5000 },
     files: [
       "programs/Pong/Bat.vm",
       "programs/Pong/Ball.vm",
@@ -33,6 +38,7 @@ const demos: Record<string, Demo> = {
   },
   hackenstein3D: {
     title: "Hackenstein 3D",
+    description: "A (very) simple first-person shooter / 3D maze game.",
     author: "James Leibert",
     projectUrl: "https://github.com/QuesterZen/hackenstein3D",
     files: [
@@ -44,8 +50,10 @@ const demos: Record<string, Demo> = {
   },
   scroller: {
     title: "Scroller",
+    description: "A demo of scrolling text across the screen.",
     author: "Gavin Stewart",
     projectUrl: "https://github.com/gav-/Nand2Tetris-Games_and_Demos",
+    config: { speed: 5000 },
     files: [
       "https://raw.githubusercontent.com/gav-/Nand2Tetris-Games_and_Demos/master/GASscroller/GASscroller.vm",
       "https://raw.githubusercontent.com/gav-/Nand2Tetris-Games_and_Demos/master/GASscroller/Main.vm",
@@ -56,6 +64,7 @@ const demos: Record<string, Demo> = {
   },
   chunky: {
     title: "Chunky",
+    description: "A bouncing ball animation.",
     author: "Gavin Stewart",
     projectUrl: "https://github.com/gav-/Nand2Tetris-Games_and_Demos",
     files: [
@@ -75,8 +84,10 @@ const demos: Record<string, Demo> = {
   },
   boing: {
     title: "Boing",
+    description: "A real-time plasma and rotozoom demo.",
     author: "Gavin Stewart",
     projectUrl: "https://github.com/gav-/Nand2Tetris-Games_and_Demos",
+    config: { speed: 5000 },
     files: [
       "https://raw.githubusercontent.com/gav-/Nand2Tetris-Games_and_Demos/master/GASboing/GASboing.vm",
       "https://raw.githubusercontent.com/gav-/Nand2Tetris-Games_and_Demos/master/GASboing/Image.vm",

@@ -5,7 +5,6 @@ import NavDropdown from "react-bootstrap/NavDropdown";
 import Nav from "react-bootstrap/Nav";
 import EmulatorPage from "./pages/emulator";
 import AboutPage from "./pages/about";
-// import JackCompilerPage from "./pages/jack-compiler";
 import demos from "./demos";
 
 function App() {
@@ -25,7 +24,9 @@ function App() {
         expanded={expanded}
         onToggle={onToggle}
       >
-        <Navbar.Brand href="/">Nand2Tetris Emulators</Navbar.Brand>
+        <Navbar.Brand as={Link} to="/">
+          Nand2Tetris VM Emulator
+        </Navbar.Brand>
         <Navbar.Toggle />
         <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="mr-auto" role="">

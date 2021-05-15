@@ -50,9 +50,6 @@ impl FunctionRef {
             function_id,
         })
     }
-    pub fn new_internal(internal_id: usize) -> FunctionRef {
-        FunctionRef::Internal(internal_id)
-    }
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
@@ -331,7 +328,7 @@ impl VMProgram {
     }
     pub fn with_internals(
         files: &Vec<(&str, &str)>,
-        internal_funcs: Option<HashMap<String, FunctionRef>>,
+        internal_funcs: Option<HashMap<&'static str, FunctionRef>>,
     ) -> Result<VMProgram, String> {
         let tokenized_program = TokenizedProgram::from_files(files)
             .map_err(|e| format!("Failed to create VMProgram: {}", e))?;
@@ -564,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_with_internals() {
-        let internals: HashMap<String, FunctionRef> = HashMap::new();
+        let internals: HashMap<&'static str, FunctionRef> = HashMap::new();
         let files = vec![(
             "Sys.vm",
             "
@@ -586,8 +583,8 @@ mod tests {
             "Expected call to missing function to use another function ref..."
         );
 
-        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
-        internals.insert("Sys.add".to_string(), FunctionRef::new_internal(0));
+        let mut internals: HashMap<&'static str, FunctionRef> = HashMap::new();
+        internals.insert("Sys.add", FunctionRef::Internal(0));
         let program = VMProgram::with_internals(&files, Some(internals)).unwrap();
         assert_eq!(
             program.warnings.len(),
@@ -596,7 +593,7 @@ mod tests {
         );
         assert_eq!(
             program.files[0].functions[0].commands[3],
-            Command::Call(FunctionRef::new_internal(0), 2),
+            Command::Call(FunctionRef::Internal(0), 2),
             "Expected call to internal function to use an internal function ref"
         );
 
@@ -616,8 +613,8 @@ mod tests {
             return
             ",
         )];
-        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
-        internals.insert("Sys.add".to_string(), FunctionRef::new_internal(0));
+        let mut internals: HashMap<&'static str, FunctionRef> = HashMap::new();
+        internals.insert("Sys.add", FunctionRef::Internal(0));
         let program = VMProgram::with_internals(&files, Some(internals)).unwrap();
         assert_eq!(
             program.warnings.len(),
@@ -626,7 +623,7 @@ mod tests {
         );
         assert_eq!(
             program.files[0].functions[0].commands[3],
-            Command::Call(FunctionRef::new_internal(0), 2),
+            Command::Call(FunctionRef::Internal(0), 2),
             "Expected internal functions to take priority over functions of the same name defined in code"
         );
     }

@@ -77,6 +77,43 @@ impl VMProfiler {
     }
 }
 
+struct InternalFunction {
+    name: &'static str,
+    num_args: usize,
+    func: fn(&mut VMEmulator) -> Result<(), String>,
+}
+
+const INTERNALS: [InternalFunction; 2] = [
+    InternalFunction {
+        name: "Math.divide",
+        num_args: 2,
+        func: |vm: &mut VMEmulator| -> Result<(), String> {
+            let a = vm
+                .pop_stack()
+                .map_err(|e| format!("exec_internal failed: {}", e))?;
+            let b = vm
+                .pop_stack()
+                .map_err(|e| format!("exec_internal failed: {}", e))?;
+            vm.push_stack(b / a);
+            Ok(())
+        },
+    },
+    InternalFunction {
+        name: "Math.multiply",
+        num_args: 2,
+        func: |vm: &mut VMEmulator| -> Result<(), String> {
+            let a = vm
+                .pop_stack()
+                .map_err(|e| format!("exec_internal failed: {}", e))?;
+            let b = vm
+                .pop_stack()
+                .map_err(|e| format!("exec_internal failed: {}", e))?;
+            vm.push_stack(b * a);
+            Ok(())
+        },
+    },
+];
+
 pub struct VMEmulator {
     program: VMProgram,
     ram: [i32; RAM_SIZE],
@@ -266,49 +303,13 @@ impl VMEmulator {
         self.get_segment_mut(to_segment)[to_index as usize] = value;
         Ok(())
     }
-    fn exec_internal(
-        &mut self,
-        internal_func_ref: FunctionRef,
-        num_args: usize,
-    ) -> Result<(), String> {
-        match internal_func_ref {
-            FunctionRef::Internal(0) => {
-                // Math.divide
-                if num_args != 2 {
-                    panic!(
-                        "Expected Math.divide to be called with 2 args, not {}",
-                        num_args
-                    );
-                }
-                let a = self
-                    .pop_stack()
-                    .map_err(|e| format!("exec_internal failed: {}", e))?;
-                let b = self
-                    .pop_stack()
-                    .map_err(|e| format!("exec_internal failed: {}", e))?;
-                self.push_stack(b / a);
-            }
-            FunctionRef::Internal(1) => {
-                // Math.multiply
-                if num_args != 2 {
-                    panic!(
-                        "Expected Math.multiply to be called with 2 args, not {}",
-                        num_args
-                    );
-                }
-                let a = self
-                    .pop_stack()
-                    .map_err(|e| format!("exec_internal failed: {}", e))?;
-                let b = self
-                    .pop_stack()
-                    .map_err(|e| format!("exec_internal failed: {}", e))?;
-                self.push_stack(b * a);
-            }
-            _ => {
-                panic!("Unknown internal function {:?}", internal_func_ref);
-            }
-        };
-        Ok(())
+
+    pub fn get_internals() -> HashMap<&'static str, FunctionRef> {
+        let mut internals: HashMap<&'static str, FunctionRef> = HashMap::new();
+        for (i, ifunc) in INTERNALS.iter().enumerate() {
+            internals.insert(ifunc.name, FunctionRef::Internal(i));
+        }
+        internals
     }
 
     fn exec_call(&mut self, function_ref: InCodeFuncRef, num_args: usize) -> Result<(), String> {
@@ -423,13 +424,6 @@ impl VMEmulator {
         }
     }
 
-    pub fn get_internals() -> HashMap<String, FunctionRef> {
-        let mut internals: HashMap<String, FunctionRef> = HashMap::new();
-        internals.insert("Math.divide".to_string(), FunctionRef::new_internal(0));
-        internals.insert("Math.multiply".to_string(), FunctionRef::new_internal(1));
-        internals
-    }
-
     pub fn profile_step(&mut self) {
         self.profiler
             .count_function_step(FunctionRef::InCode(self.frame().function));
@@ -460,8 +454,12 @@ impl VMEmulator {
                     self.exec_call(in_code_func_ref, num_args as usize)
                         .map_err(|e| format!("failed step {:?}: {}", command, e))?;
                 }
-                other_ref => {
-                    self.exec_internal(other_ref, num_args as usize)
+                FunctionRef::Internal(internal_index) => {
+                    let internal_func = &INTERNALS[internal_index];
+                    if internal_func.num_args != num_args as usize {
+                        panic!("Wrong number of args passed to {}", internal_func.name);
+                    }
+                    (internal_func.func)(self)
                         .map_err(|e| format!("failed step {:?}: {}", command, e))?;
                     self.frame_mut().index += 1;
                 }

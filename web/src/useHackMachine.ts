@@ -103,6 +103,7 @@ export default function useHackMachine(
   };
 
   return {
+    machine,
     loading,
     canvasRef,
     paused,

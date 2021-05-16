@@ -131,6 +131,10 @@ impl WebVM {
     pub fn get_stats(&self) -> JsValue {
         JsValue::from(format!("Stats: \n{}", self.vm.profiler_stats()))
     }
+
+    pub fn get_debug(&self) -> JsValue {
+        JsValue::from(self.vm.debug())
+    }
 }
 
 fn pixels_from_ram(ram: &[i32]) -> Vec<u8> {

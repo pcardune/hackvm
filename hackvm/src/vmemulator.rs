@@ -520,7 +520,7 @@ impl VMEmulator {
         return Ok(None);
     }
 
-    fn debug(&self) -> String {
+    pub fn debug(&self) -> String {
         use std::fmt::Write;
         let mut s = String::new();
         writeln!(&mut s, "Step: {}", self.step_counter).unwrap();

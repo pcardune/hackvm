@@ -1,7 +1,5 @@
 import type { WebVM } from "hackvm";
 
-type HackModule = typeof import("hackvm");
-
 function getKeyValue(key: string) {
   const keyMap: Record<string, number> = {
     ArrowLeft: 130,
@@ -31,21 +29,19 @@ export default class RustHackMachine {
     }
     machine.init();
 
-    return new RustHackMachine(machine, hack);
+    return new RustHackMachine(machine);
   }
 
   private m: WebVM;
-  private hack: HackModule;
   private profile: boolean;
-  private constructor(m: WebVM, hack: HackModule) {
+  private constructor(m: WebVM) {
     this.m = m;
-    this.hack = hack;
     this.profile = false;
   }
 
   numCycles: number = 0;
   tick(n: number): void {
-    if (this.profile && this.m instanceof this.hack.WebVM) {
+    if (this.profile) {
       this.m.tick_profiled(n);
     } else {
       this.m.tick(n);
@@ -55,14 +51,18 @@ export default class RustHackMachine {
   reset(): void {
     this.m.reset();
     this.numCycles = 0;
-    if (this.profile && this.m instanceof this.hack.WebVM) {
+    if (this.profile) {
       console.log(this.m.get_stats());
     }
+    console.log(this.m.get_debug());
   }
   setKeyboard(event: { key: string } | null): void {
     this.m.set_keyboard(event ? getKeyValue(event.key) : 0);
   }
   drawScreen(ctx: CanvasRenderingContext2D): void {
     this.m.draw_screen(ctx);
+  }
+  getVM(): WebVM {
+    return this.m;
   }
 }

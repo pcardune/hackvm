@@ -10,6 +10,9 @@ function EmulatorPage() {
   const { demoId = "pong" } = useParams<{ demoId: string }>();
 
   const demo = demos[demoId];
+  if (!demo) {
+    return <Container>No demo found at this url.</Container>;
+  }
   const urls = demo ? [...demo.files, ...OSFiles] : [];
   const defaultConfig = { speed: 20000 };
   const config =

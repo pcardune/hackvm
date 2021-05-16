@@ -27,6 +27,7 @@ Next we must compile all the Typescript/React code into plain html/javascript.
 From the `web` directory run:
 
 ```bash
+yarn install
 yarn build
 ```
 
@@ -41,3 +42,14 @@ python3 -m http.server
 ```
 
 For more details about building the website or the vm, refer to the README files in the `hackvm` and `web` subdirectories.
+
+### Building During Developement
+
+During development, to avoid constantly having to run `yarn install` while making changes to and compiling the rust code, you'll want to use `yarn link` to symlink the `hackvm/pkg` directory. From the repository root, this can be done with the following:
+
+```bash
+cd hackvm/pkg
+yarn link
+cd ../../web
+yarn link hackvm
+```

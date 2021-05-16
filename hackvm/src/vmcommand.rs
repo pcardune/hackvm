@@ -27,8 +27,8 @@ pub const SEGMENTS: [Segment; 8] = [
 
 #[derive(Eq, Hash, PartialEq, Copy, Clone, Debug)]
 pub struct InCodeFuncRef {
-    file_id: usize,
-    function_id: usize,
+    file_index: usize,
+    function_index: usize,
 }
 
 impl InCodeFuncRef {
@@ -44,10 +44,10 @@ pub enum FunctionRef {
 }
 
 impl FunctionRef {
-    pub fn new(file_id: usize, function_id: usize) -> FunctionRef {
+    pub fn new(file_index: usize, function_index: usize) -> FunctionRef {
         FunctionRef::InCode(InCodeFuncRef {
-            file_id,
-            function_id,
+            file_index,
+            function_index,
         })
     }
 }
@@ -304,7 +304,7 @@ impl VMProgram {
     }
 
     pub fn get_vmfunction(&self, func_ref: &InCodeFuncRef) -> &VMFunction {
-        &self.files[func_ref.file_id].functions[func_ref.function_id]
+        &self.files[func_ref.file_index].functions[func_ref.function_index]
     }
 
     pub fn get_command(&self, func_ref: &InCodeFuncRef, index: usize) -> &Command {
@@ -312,7 +312,7 @@ impl VMProgram {
     }
 
     pub fn get_file(&self, func_ref: &InCodeFuncRef) -> &VMFile {
-        &self.files[func_ref.file_id]
+        &self.files[func_ref.file_index]
     }
 
     pub fn empty() -> VMProgram {
@@ -343,9 +343,8 @@ impl VMProgram {
             }
         }
 
-        for (file_id, tokenized_file) in tokenized_program.files.iter().enumerate() {
-            let mut function_id = 0;
-            for tokenized_func in tokenized_file.functions.iter() {
+        for (file_index, tokenized_file) in tokenized_program.files.iter().enumerate() {
+            for (function_index, tokenized_func) in tokenized_file.functions.iter().enumerate() {
                 match function_table.get(&tokenized_func.name) {
                     Some(FunctionRef::InCode { .. }) => {
                         return Err(format!("function {:?} declared twice", tokenized_func.name));
@@ -356,9 +355,8 @@ impl VMProgram {
                     None => {
                         function_table.insert(
                             tokenized_func.name.clone(),
-                            FunctionRef::new(file_id, function_id),
+                            FunctionRef::new(file_index, function_index),
                         );
-                        function_id += 1;
                     }
                 }
             }

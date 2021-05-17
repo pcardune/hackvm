@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import RustHackMachine from "./RustHackMachine";
 import RemoteFS from "./RemoteFS";
+import safeInterval from "./safeInterval";
 
 export default function useHackMachine(
   url: string[],
@@ -44,12 +45,12 @@ export default function useHackMachine(
     if (!machine) return;
     if (paused) return;
     const startTime = new Date().getTime();
-    const computeInterval = setInterval(() => {
+    const computeInterval = safeInterval(() => {
       machine?.tick(speed);
     }, 0);
     let onTickInterval: NodeJS.Timeout;
     if (onTick) {
-      onTickInterval = setInterval(
+      onTickInterval = safeInterval(
         () => onTick(machine, new Date().getTime() - startTime),
         1000 / 30
       );
@@ -65,7 +66,7 @@ export default function useHackMachine(
     if (!machine) return;
     const context = canvasRef.current?.getContext("2d");
     if (!context) return;
-    const renderInterval = setInterval(() => {
+    const renderInterval = safeInterval(() => {
       machine.drawScreen(context);
     }, 1000 / 30);
     return () => {

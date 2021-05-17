@@ -8,6 +8,7 @@ import IconButton from "./IconButton";
 import Spinner from "react-bootstrap/Spinner";
 import useHackMachine from "./useHackMachine";
 import type RustHackMachine from "./RustHackMachine";
+import safeInterval from "./safeInterval";
 
 type HackEmulatorProps = {
   urls: string[];
@@ -53,7 +54,7 @@ const HackEmulator = ({ urls, config, children }: HackEmulatorProps) => {
   useEffect(() => {
     if (!machine) return;
     if (paused) return;
-    const timeout = setInterval(() => {
+    const timeout = safeInterval(() => {
       setVMState(machine?.getVM().get_debug());
     }, 500);
     return () => {

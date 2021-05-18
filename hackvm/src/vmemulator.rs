@@ -3,7 +3,6 @@ use super::vmcommand::{
 };
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::{cmp, usize};
 
 const RAM_SIZE: usize = 16384 + 8192 + 1;
 
@@ -220,11 +219,18 @@ impl VMEmulator {
         self.push_global_stack(value);
     }
 
+    /// get the function-scoped part of the global stack, which goes from the end
+    /// of the local segment to the global stack pointer.
     fn get_stack(&self) -> &[i32] {
-        let (_, local_end) = self.get_segment_bounds(Segment::Local);
-        let start = cmp::max(local_end, 256);
-        let end = self.ram[SP] as usize;
-        &self.ram[start..end]
+        let (_local_start, local_end) = self.get_segment_bounds(Segment::Local);
+        let stack_pointer = self.ram[SP] as usize;
+        // in the event that the function locals haven't been initialized yet, i.e. immediately
+        // following a `call` instruction but before a `function` instruction,
+        // the function-scoped stack should be empty.
+        if stack_pointer < local_end {
+            return &[];
+        }
+        &self.ram[local_end..stack_pointer]
     }
 
     fn peek_stack(&self) -> i32 {
@@ -346,6 +352,8 @@ impl VMEmulator {
 
     pub fn init(&mut self) -> Result<(), String> {
         self.ram[SP] = 256;
+        self.ram[LCL] = 256;
+        self.ram[ARG] = 256;
         if let Some(init_func) = self.program.get_function_ref("Sys.init") {
             self.call_stack.push(VMStackFrame::new(init_func, 0));
             return Ok(());
@@ -530,7 +538,7 @@ impl VMEmulator {
                 .program
                 .get_function_name(&frame.function.to_function_ref())
                 .unwrap_or("Unknown Function");
-            writeln!(&mut s, "  {}", func_name).unwrap();
+            writeln!(&mut s, "  {}[{}]", func_name, &frame.index).unwrap();
         }
         writeln!(&mut s, "Stack: {:?}", self.get_stack()).unwrap();
         for segment in SEGMENTS.iter() {
@@ -691,6 +699,7 @@ mod tests {
                     &[0],
                     "Static segment should be initialized to 0s"
                 );
+                vm.step().unwrap();
                 vm.push_stack(10);
                 assert_eq!(vm.get_stack(), &[10]);
                 vm.exec_pop(Segment::Static, 0).unwrap();
@@ -815,10 +824,12 @@ mod tests {
                         (
                             "Main.vm",
                             "
-                                function Main.add 0
+                                function Main.add 1
                                 push argument 0
                                 push argument 1
                                 add
+                                pop local 0
+                                push local 0
                                 return",
                         ),
                     ])
@@ -831,6 +842,10 @@ mod tests {
             #[test]
             fn function_calls() {
                 let mut vm = setup_vm();
+                for i in 0..100_usize {
+                    // initialize ram with some garbage values to see how initialization works
+                    vm.ram[vm.ram[SP] as usize + i] = 0xBAD;
+                }
                 vm.push_stack(2);
                 vm.push_stack(3);
                 vm.exec_call(vm.program.get_function_ref("Main.add").unwrap(), 2)
@@ -840,7 +855,30 @@ mod tests {
                     &[2, 3],
                     "After a call, argument segment should point to arguments from stack"
                 );
+                assert_eq!(vm.ram[ARG], 256, "Expected ARG register to be 256");
+                assert_eq!(vm.ram[SP], 256 + 5 + 2, "Expected SP register to be 263");
+                assert_eq!(
+                    vm.ram[LCL], vm.ram[SP],
+                    "Expected LCL register to be the same as SP register"
+                );
                 assert_eq!(vm.ram[256..258], [2, 3]);
+                assert_eq!(
+                    vm.get_stack(),
+                    &[],
+                    "After a call, the local function stack should be empty"
+                );
+
+                assert_eq!(
+                    vm.get_segment(Segment::Local),
+                    &[0xBAD],
+                    "After a call, the local segment should be whatever was in ram."
+                );
+                vm.step().unwrap();
+                assert_eq!(
+                    vm.get_segment(Segment::Local),
+                    &[0],
+                    "After entering into function, local segment should be initialized to 0."
+                );
             }
         }
     }

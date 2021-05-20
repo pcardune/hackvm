@@ -64,7 +64,7 @@ const demos: Record<string, Demo> = {
   },
   chunky: {
     title: "Chunky",
-    description: "A bouncing ball animation.",
+    description: "A real-time plasma and rotozoom demo.",
     author: "Gavin Stewart",
     projectUrl: "https://github.com/gav-/Nand2Tetris-Games_and_Demos",
     files: [
@@ -84,7 +84,7 @@ const demos: Record<string, Demo> = {
   },
   boing: {
     title: "Boing",
-    description: "A real-time plasma and rotozoom demo.",
+    description: "A bouncing ball animation.",
     author: "Gavin Stewart",
     projectUrl: "https://github.com/gav-/Nand2Tetris-Games_and_Demos",
     config: { speed: 5000 },

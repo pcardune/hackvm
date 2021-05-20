@@ -1,6 +1,7 @@
 use super::vmparser::{parse_lines, Token};
 use std::cmp;
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Segment {
@@ -14,16 +15,11 @@ pub enum Segment {
     Temp,
 }
 
-pub const SEGMENTS: [Segment; 8] = [
-    Segment::Constant,
-    Segment::Argument,
-    Segment::Local,
-    Segment::Static,
-    Segment::This,
-    Segment::That,
-    Segment::Pointer,
-    Segment::Temp,
-];
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&format!("{:?}", self).to_lowercase())
+    }
+}
 
 #[derive(Eq, Hash, PartialEq, Copy, Clone, Debug)]
 pub struct InCodeFuncRef {
@@ -92,6 +88,57 @@ pub enum Command {
     },
 }
 
+impl Command {
+    pub fn to_string(&self, program: &VMProgram) -> String {
+        match self {
+            Command::Arithmetic(op) => format!("{:?}", op).to_lowercase(),
+            Command::Push(segment, index) => {
+                format!("push {} {}", segment, index)
+            }
+            Command::Pop(segment, index) => {
+                format!("pop {} {}", segment, index)
+            }
+            Command::If(index) => {
+                format!("if-goto {}", index)
+            }
+            Command::Goto(index) => {
+                format!("goto {}", index)
+            }
+            Command::Function(func_ref, num_locals) => {
+                format!(
+                    "function {} {}",
+                    program
+                        .get_function_name(func_ref)
+                        .unwrap_or("Unknown Function"),
+                    num_locals
+                )
+            }
+            Command::Return => "return".to_string(),
+            Command::Call(func_ref, num_args) => {
+                format!(
+                    "call {} {}",
+                    program
+                        .get_function_name(func_ref)
+                        .unwrap_or("Unknown Function"),
+                    num_args
+                )
+            }
+            Command::CopySeg {
+                from_segment,
+                from_index,
+                to_segment,
+                to_index,
+            } => {
+                format!(
+                    "{}\n{}",
+                    Command::Push(*from_segment, *from_index).to_string(program),
+                    Command::Push(*to_segment, *to_index).to_string(program)
+                )
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VMFunction {
     pub id: FunctionRef,
@@ -108,7 +155,7 @@ pub struct VMFile {
     pub static_offset: usize,
 }
 
-type FunctionTable = HashMap<String, FunctionRef>;
+type FunctionTable = bimap::BiMap<String, FunctionRef>;
 type LabelTable = HashMap<String, usize>;
 
 #[derive(PartialEq, Clone, Debug)]
@@ -209,6 +256,7 @@ impl TokenizedFunctionOptimized {
                 match label_table.get(label) {
                     Some(_) => return Err(format!("label {:?} declared twice", label)),
                     None => {
+                        println!("Inserting label {}", label);
                         label_table.insert(label.to_string(), command_index);
                     }
                 }
@@ -288,15 +336,12 @@ pub struct VMProgram {
 
 impl VMProgram {
     pub fn get_function_name(&self, func_ref: &FunctionRef) -> Option<&str> {
-        for (key, value) in self.function_table.iter() {
-            if func_ref == value {
-                return Some(key);
-            }
-        }
-        None
+        self.function_table.get_by_right(func_ref).map(|s| &s[..])
     }
     pub fn get_function_ref(&self, name: &str) -> Option<InCodeFuncRef> {
-        if let Some(FunctionRef::InCode(in_code_ref)) = self.function_table.get(&name.to_string()) {
+        if let Some(FunctionRef::InCode(in_code_ref)) =
+            self.function_table.get_by_left(&name.to_string())
+        {
             Some(*in_code_ref)
         } else {
             None
@@ -318,7 +363,7 @@ impl VMProgram {
     pub fn empty() -> VMProgram {
         VMProgram {
             files: Vec::new(),
-            function_table: HashMap::new(),
+            function_table: bimap::BiMap::new(),
             warnings: Vec::new(),
         }
     }
@@ -333,7 +378,7 @@ impl VMProgram {
         let tokenized_program = TokenizedProgram::from_files(files)
             .map_err(|e| format!("Failed to create VMProgram: {}", e))?;
 
-        let mut function_table: FunctionTable = HashMap::new();
+        let mut function_table: FunctionTable = bimap::BiMap::new();
         // let mut tokenized_files: Vec<TokenizedFile> = Vec::new();
         let mut warnings: Vec<Box<str>> = Vec::new();
         // tokenize files and build function table
@@ -345,7 +390,7 @@ impl VMProgram {
 
         for (file_index, tokenized_file) in tokenized_program.files.iter().enumerate() {
             for (function_index, tokenized_func) in tokenized_file.functions.iter().enumerate() {
-                match function_table.get(&tokenized_func.name) {
+                match function_table.get_by_left(&tokenized_func.name) {
                     Some(FunctionRef::InCode { .. }) => {
                         return Err(format!("function {:?} declared twice", tokenized_func.name));
                     }
@@ -384,7 +429,7 @@ impl VMProgram {
                     tokens.next().unwrap()
                 {
                     let function_ref = *function_table
-                        .get(&func_name.to_string())
+                        .get_by_left(&func_name.to_string())
                         .expect("Expected to find function name in function table");
                     let mut vmfunc = VMFunction {
                         id: function_ref,
@@ -434,7 +479,10 @@ impl VMProgram {
                                 // function commands
                                 Token::Function(_, _) => panic!("Didn't expect Token::Function"),
                                 Token::Call(func_to_call, num_args) => {
-                                    match function_table.get(&func_to_call.to_string()).copied() {
+                                    match function_table
+                                        .get_by_left(&func_to_call.to_string())
+                                        .copied()
+                                    {
                                         Some(func_ref) => Command::Call(func_ref, *num_args),
                                         None => {
                                             warnings.push(
@@ -651,6 +699,7 @@ mod tests {
                 if-goto SAVE
                 return
                 label SAVE
+                label SAVE2
                 push local 0
                 pop static 0
             return
@@ -661,11 +710,11 @@ mod tests {
         assert_eq!(program.files.len(), 1);
         assert_eq!(program.files[0].functions.len(), 2);
         assert_eq!(
-            program.function_table.get("Sys.init").unwrap(),
+            program.function_table.get_by_left("Sys.init").unwrap(),
             &FunctionRef::new(0, 0)
         );
         assert_eq!(
-            program.function_table.get("Sys.incr").unwrap(),
+            program.function_table.get_by_left("Sys.incr").unwrap(),
             &FunctionRef::new(0, 1)
         );
         assert_eq!(

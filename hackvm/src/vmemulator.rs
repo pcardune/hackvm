@@ -1,6 +1,4 @@
-use super::vmcommand::{
-    Command, FunctionRef, InCodeFuncRef, Operation, Segment, VMProgram, SEGMENTS,
-};
+use super::vmcommand::{Command, FunctionRef, InCodeFuncRef, Operation, Segment, VMProgram};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -540,16 +538,26 @@ impl VMEmulator {
                 .unwrap_or("Unknown Function");
             writeln!(&mut s, "  {}[{}]", func_name, &frame.index).unwrap();
         }
-        writeln!(&mut s, "Stack: {:?}", self.get_stack()).unwrap();
-        for segment in SEGMENTS.iter() {
-            match segment {
-                Segment::Static | Segment::Temp => {
-                    writeln!(&mut s, "{:?}: {:?}", segment, self.get_segment(*segment)).unwrap();
-                }
-                _ => {}
-            }
+        writeln!(&mut s, "Function Stack: {:?}", self.get_stack()).unwrap();
+        let segments = [
+            Segment::Static,
+            Segment::Temp,
+            Segment::Local,
+            Segment::Argument,
+            Segment::Pointer,
+        ];
+        for segment in segments.iter() {
+            writeln!(
+                &mut s,
+                "{:?} Segment: {:?}",
+                segment,
+                self.get_segment(*segment)
+            )
+            .unwrap();
         }
-        writeln!(&mut s, "Next Command: {:?}", self.next_command()).unwrap();
+        if let Some(command) = self.next_command() {
+            writeln!(&mut s, "Next Command: {}", command.to_string(&self.program)).unwrap();
+        }
         return s;
     }
 

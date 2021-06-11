@@ -14,6 +14,11 @@ web browser.
 
 ## Building
 
+### Build Dependencies
+
+1. [Install wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
+
+### Build Steps
 There are two parts to the build. First we must compile the rust code into web assembly.
 
 From the `hackvm` directory run:

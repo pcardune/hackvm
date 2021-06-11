@@ -12,8 +12,9 @@ use web_sys::{CanvasRenderingContext2d, ImageData};
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
-pub use vmcommand::VMProgram;
+pub use vmcommand::{
+    Command as VMCommand, Operation as VMOperation, Segment as VMSegment, VMProgram,
+};
 pub use vmemulator::VMEmulator;
 
 #[wasm_bindgen]

@@ -1,7 +1,40 @@
 function Sys.init 0
+
+// 10 + 12 = 22
 push constant 10
 push constant 12
 add
-pop temp 0
-push temp 0
+pop temp 0 // RAM[5] == 16
+
+// 9 - 7 = 2
+push constant 7
+push constant 9
+sub
+pop temp 1 // RAM[6] == 2
+
+// -8 = -8
+push constant 8
+neg
+pop temp 2 // RAM[7] == -8
+
+// ~5 = ??
+push constant 5
+not
+pop temp 3 // RAM[8] == -6
+
+// 21 & 25 = 17
+push constant 21
+push constant 25
+and
+pop temp 4 // RAM[9] == 17
+
+// 21 | 25 = 29
+push constant 21
+push constant 25
+or
+pop temp 5 // RAM[10] == 29
+
+
+// return 0
+push constant 0
 return

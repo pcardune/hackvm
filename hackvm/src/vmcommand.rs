@@ -132,7 +132,7 @@ impl Command {
                 format!(
                     "{}\n{}",
                     Command::Push(*from_segment, *from_index).to_string(program),
-                    Command::Push(*to_segment, *to_index).to_string(program)
+                    Command::Pop(*to_segment, *to_index).to_string(program)
                 )
             }
         }

@@ -10,7 +10,7 @@ int main() {
   hack_sys_init(&ram);
   printf("output is (at %p):\n", ram);
   for (int i = 0; i < 16; i++) {
-    printf("  [%2i] = %x\n", i, (short)ram[i]);
+    printf("  [%2i] = %d\n", i, (short)ram[i]);
   }
   exit(EXIT_SUCCESS);
 }

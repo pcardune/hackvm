@@ -6,6 +6,81 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{fs, process};
 
+fn compile_arithmetic(op: &VMOperation) -> String {
+    match op {
+        VMOperation::Add => "\
+            pop     rax
+            pop     rbx
+            add     rax, rbx
+            push    rax"
+            .to_string(),
+        VMOperation::Sub => "\
+            pop     rax
+            pop     rbx
+            sub     rax, rbx
+            push    rax"
+            .to_string(),
+        VMOperation::Neg => "\
+            pop     rax
+            mov     rbx, 0
+            sub     rbx, rax
+            push    rbx"
+            .to_string(),
+        VMOperation::Not => "\
+            pop     rax
+            not     rax
+            push    rax"
+            .to_string(),
+        VMOperation::And => "\
+            pop     rax
+            pop     rbx
+            and     rax, rbx
+            push    rax"
+            .to_string(),
+        VMOperation::Or => "\
+            pop     rax
+            pop     rbx
+            or      rax, rbx
+            push    rax"
+            .to_string(),
+        _ => panic!("Don't know how to arithmetic operation {:?} yet", op),
+    }
+}
+
+fn compile_pop(segment: &VMSegment, index: &u16) -> String {
+    match segment {
+        VMSegment::Temp => {
+            format!("pop     qword [RAM + {}]", (index + 5) * 8)
+        }
+        _ => panic!("Don't know how to pop to segment {:?} yet", segment),
+    }
+}
+
+fn compile_push(segment: &VMSegment, index: &u16) -> String {
+    match segment {
+        VMSegment::Constant => {
+            let value = index;
+            format!(
+                "\
+                        mov      rax, {}\n\
+                        push     rax\n",
+                value
+            )
+        }
+        VMSegment::Temp => {
+            format!(
+                "\
+                        push     qword [RAM + {}]\n",
+                (index + 5) * 8
+            )
+        }
+        _ => panic!(
+            "Don't know how to compile push for segment {:?} yet",
+            segment
+        ),
+    }
+}
+
 fn compile(program: &VMProgram, output_path: &Path) -> Result<()> {
     let mut file = fs::File::create(output_path).with_context(|| {
         format!(
@@ -34,8 +109,12 @@ hack_sys_init:
     ret
     \n";
     write!(file, "{}", preamble).context("Failed writing to output file")?;
-    let indent =
-        |lines: String| -> String { lines.lines().map(|line| format!("\t{}\n", line)).collect() };
+    let indent = |lines: String| -> String {
+        lines
+            .lines()
+            .map(|line| format!("\t{}\n", line.trim()))
+            .collect()
+    };
     for command in program.files[0].functions[0].commands.iter() {
         let asm = match command {
             VMCommand::Function(func_ref, _num_locals) => {
@@ -43,56 +122,33 @@ hack_sys_init:
                 format!("global {}\n{}:\n", func_name, func_name)
             }
             VMCommand::Return => "\
-                pop      ax\n\
+                pop      rax\n\
                 ret\n"
                 .to_string(),
-            VMCommand::Push(segment, index) => match segment {
-                VMSegment::Constant => {
-                    let value = index;
-                    format!(
-                        "\
-                        mov      ax, {}\n\
-                        push     ax\n",
-                        value
-                    )
-                }
-                VMSegment::Temp => {
-                    format!(
-                        "\
-                        push     qword [RAM + {}]\n",
-                        (index + 5) * 8
-                    )
-                }
-                _ => panic!("Don't know how to compile {:?} yet", command),
-            },
-            VMCommand::Pop(segment, index) => match segment {
-                VMSegment::Temp => {
-                    format!(
-                        "\
-                        pop     qword [RAM + {}]
-                        ",
-                        (index + 5) * 8
-                    )
-                }
-                _ => panic!("Don't know how to pop to segment {:?} yet", segment),
-            },
-            VMCommand::Arithmetic(op) => match op {
-                VMOperation::Add => {
-                    format!(
-                        "\
-                        pop      ax\n\
-                        pop      bx\n\
-                        add      ax, bx\n\
-                        push     ax\n"
-                    )
-                }
-                _ => panic!("Don't know how to compile {:?} yet", command),
-            },
+            VMCommand::Push(segment, index) => compile_push(segment, index),
+            VMCommand::Pop(segment, index) => compile_pop(segment, index),
+            VMCommand::CopySeg {
+                from_segment,
+                from_index,
+                to_segment,
+                to_index,
+            } => {
+                format!(
+                    "{}\n{}",
+                    compile_push(from_segment, from_index),
+                    compile_pop(to_segment, to_index)
+                )
+            }
+            VMCommand::Arithmetic(op) => compile_arithmetic(op),
             _ => panic!("Don't know how to compile {:?} yet", command),
         };
         let asm = indent(asm);
-        write!(file, "; {}\n{}", command.to_string(program), asm)
-            .context("failed writing to output file")?;
+        let comment: String = command
+            .to_string(program)
+            .split("\n")
+            .map(|s| format!("; {}\n", s))
+            .collect();
+        write!(file, "{}{}", comment, asm).context("failed writing to output file")?;
     }
     Ok(())
 }

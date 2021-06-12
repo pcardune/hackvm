@@ -43,7 +43,36 @@ fn compile_arithmetic(op: &VMOperation) -> String {
             or      rax, rbx
             push    rax"
             .to_string(),
-        _ => panic!("Don't know how to arithmetic operation {:?} yet", op),
+        VMOperation::Eq => "\
+            pop     rax
+            pop     rbx
+            cmp     rax, rbx
+            mov     rcx, -1
+            cmove   rax, rcx
+            mov     rcx, 0
+            cmovne  rax, rcx
+            push    rax"
+            .to_string(),
+        VMOperation::Gt => "\
+            pop     rax
+            pop     rbx
+            cmp     rax, rbx
+            mov     rcx, -1
+            cmovg   rax, rcx
+            mov     rcx, 0
+            cmovng  rax, rcx
+            push    rax"
+            .to_string(),
+        VMOperation::Lt => "\
+            pop     rax
+            pop     rbx
+            cmp     rax, rbx
+            mov     rcx, -1
+            cmovl   rax, rcx
+            mov     rcx, 0
+            cmovnl  rax, rcx
+            push    rax"
+            .to_string(),
     }
 }
 

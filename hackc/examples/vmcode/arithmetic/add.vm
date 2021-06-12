@@ -34,6 +34,17 @@ push constant 25
 or
 pop temp 5 // RAM[10] == 29
 
+// 21 == 23 = 0
+push constant 21
+push constant 23
+eq
+pop temp 6 // RAM[11] == 0
+
+// 21 == 21 = -1
+push constant 21
+push constant 21
+eq
+pop temp 7 // RAM[12] == -1
 
 // return 0
 push constant 0

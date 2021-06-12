@@ -1,4 +1,3 @@
-// use hackvm::VMProgram;
 use anyhow::{Context, Result};
 use clap::{App, Arg};
 use hackvm::{VMCommand, VMOperation, VMProgram, VMSegment};
@@ -19,12 +18,20 @@ section .data
     EXIT_SUCCESS    equ     0
     SYS_exit        equ     60
 
+section .bss
+    RAM             resq    16384 + 8192 + 1
+
 section .text
 
-global _start
-_start:
+; Arguments Passed:
+;     1) rdi - address of memory block
+; Returns: VOID
+global hack_sys_init
+hack_sys_init:
+    mov dword [rdi], 53
+    mov dword [rdi], RAM
     call Sys.init
-    jmp  last
+    ret
     \n";
     write!(file, "{}", preamble).context("Failed writing to output file")?;
     let indent =
@@ -39,8 +46,9 @@ _start:
                 pop      ax\n\
                 ret\n"
                 .to_string(),
-            VMCommand::Push(segment, value) => match segment {
+            VMCommand::Push(segment, index) => match segment {
                 VMSegment::Constant => {
+                    let value = index;
                     format!(
                         "\
                         mov      ax, {}\n\
@@ -48,7 +56,25 @@ _start:
                         value
                     )
                 }
+                VMSegment::Temp => {
+                    format!(
+                        "\
+                        push     qword [RAM + {}]\n",
+                        (index + 5) * 8
+                    )
+                }
                 _ => panic!("Don't know how to compile {:?} yet", command),
+            },
+            VMCommand::Pop(segment, index) => match segment {
+                VMSegment::Temp => {
+                    format!(
+                        "\
+                        pop     qword [RAM + {}]
+                        ",
+                        (index + 5) * 8
+                    )
+                }
+                _ => panic!("Don't know how to pop to segment {:?} yet", segment),
             },
             VMCommand::Arithmetic(op) => match op {
                 VMOperation::Add => {
@@ -68,15 +94,6 @@ _start:
         write!(file, "; {}\n{}", command.to_string(program), asm)
             .context("failed writing to output file")?;
     }
-    write!(
-        file,
-        "
-last:
-    mov    rax, SYS_exit
-    mov    rdi, EXIT_SUCCESS
-    syscall
-    "
-    )?;
     Ok(())
 }
 
@@ -138,6 +155,22 @@ fn main() {
     let out_dir = std::path::Path::new("out");
     fs::create_dir_all(out_dir).unwrap();
 
+    let runtime_dir = std::path::Path::new("hackc/runtime");
+    let runtime_obj_path = out_dir.join("runtime.o");
+    if !run(
+        "runtime",
+        Command::new("gcc")
+            .arg("-g")
+            .arg("-Wall")
+            .arg("-c")
+            .arg(runtime_dir.join("main.c"))
+            .arg("-o")
+            .arg(&runtime_obj_path),
+    ) {
+        println!("Well that didn't go well...");
+        process::exit(1);
+    }
+
     let asm_out_path = out_dir.join("out.asm");
     compile(&vm_program, &asm_out_path).unwrap();
 
@@ -165,10 +198,12 @@ fn main() {
 
     if !run(
         "link",
-        process::Command::new("ld")
+        process::Command::new("g++")
             .arg("-g")
+            .arg("-no-pie")
             .arg("-o")
             .arg(&executable_out_path)
+            .arg(&runtime_obj_path)
             .arg(&obj_out_path),
     ) {
         println!("Well that didn't go well...");

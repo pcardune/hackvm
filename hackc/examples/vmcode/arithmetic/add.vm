@@ -2,4 +2,6 @@ function Sys.init 0
 push constant 10
 push constant 12
 add
+pop temp 0
+push temp 0
 return

@@ -238,63 +238,66 @@ hack_sys_init:
             .collect()
     };
     let mut lines: Vec<String> = vec![];
-    let file = &program.files[0];
-    let mut num_statics = 0;
-    let context = CommandContext {
-        file_name: file.name.clone(),
-    };
-    for function in file.functions.iter() {
-        for command in function.commands.iter() {
-            let comment: String = format!("; {}", command);
-            lines.push(comment);
+    for file in program.files.iter() {
+        let mut num_statics = 0;
+        let context = CommandContext {
+            file_name: file.name.clone(),
+        };
+        for function in file.functions.iter() {
+            for command in function.commands.iter() {
+                let comment: String = format!("; {}", command);
+                lines.push(comment);
 
-            num_statics = match command {
-                VMToken::Push(VMSegment::Static, index)
-                | VMToken::Pop(VMSegment::Static, index) => cmp::max(num_statics, *index + 1),
-                _ => num_statics,
-            };
+                num_statics = match command {
+                    VMToken::Push(VMSegment::Static, index)
+                    | VMToken::Pop(VMSegment::Static, index) => cmp::max(num_statics, *index + 1),
+                    _ => num_statics,
+                };
 
-            let asm = match command {
-                VMToken::Call(func_name, num_args) => compile_call(func_name, num_args),
-                VMToken::Function(func_name, num_locals) => compile_function(func_name, num_locals),
-                VMToken::Return => compile_return(),
-                VMToken::Push(segment, index) => compile_push(&context, segment, index),
-                VMToken::Pop(segment, index) => compile_pop(&context, segment, index),
-                VMToken::Neg
-                | VMToken::Not
-                | VMToken::Add
-                | VMToken::Sub
-                | VMToken::And
-                | VMToken::Or
-                | VMToken::Eq
-                | VMToken::Lt
-                | VMToken::Gt => compile_arithmetic(command),
-                VMToken::Label(label) => format!(".{}:", label),
-                VMToken::Goto(label) => format!("jmp .{}", label),
-                VMToken::If(label) => {
-                    format!(
-                        "\
+                let asm = match command {
+                    VMToken::Call(func_name, num_args) => compile_call(func_name, num_args),
+                    VMToken::Function(func_name, num_locals) => {
+                        compile_function(func_name, num_locals)
+                    }
+                    VMToken::Return => compile_return(),
+                    VMToken::Push(segment, index) => compile_push(&context, segment, index),
+                    VMToken::Pop(segment, index) => compile_pop(&context, segment, index),
+                    VMToken::Neg
+                    | VMToken::Not
+                    | VMToken::Add
+                    | VMToken::Sub
+                    | VMToken::And
+                    | VMToken::Or
+                    | VMToken::Eq
+                    | VMToken::Lt
+                    | VMToken::Gt => compile_arithmetic(command),
+                    VMToken::Label(label) => format!(".{}:", label),
+                    VMToken::Goto(label) => format!("jmp .{}", label),
+                    VMToken::If(label) => {
+                        format!(
+                            "\
                     pop      rax
                     cmp      rax, 0
                     je .{}
                 ",
-                        label
-                    )
-                }
-                VMToken::None => "".to_string(),
-            };
-            let asm = indent(asm);
-            lines.push(asm);
+                            label
+                        )
+                    }
+                    VMToken::None => "".to_string(),
+                };
+                let asm = indent(asm);
+                lines.push(asm);
+            }
+        }
+        if num_statics > 0 {
+            bss_section.insert(
+                &format!("{}.statics", file.name),
+                "resq",
+                &format!("{}", num_statics * 8),
+            )?;
         }
     }
 
-    if num_statics > 0 {
-        bss_section.insert(
-            &format!("{}.statics", file.name),
-            "resq",
-            &format!("{}", num_statics * 8),
-        )?;
-    }
     output_file
         .write(data_section.to_string().as_bytes())
         .context("Failed writing data section to output file")?;

@@ -391,22 +391,6 @@ fn main() {
     let out_dir = std::path::Path::new("out");
     fs::create_dir_all(out_dir).unwrap();
 
-    let runtime_dir = std::path::Path::new("hackc/runtime");
-    let runtime_obj_path = out_dir.join("runtime.o");
-    if !run(
-        "runtime",
-        Command::new("gcc")
-            .arg("-g")
-            .arg("-Wall")
-            .arg("-c")
-            .arg(runtime_dir.join("main.c"))
-            .arg("-o")
-            .arg(&runtime_obj_path),
-    ) {
-        println!("Well that didn't go well...");
-        process::exit(1);
-    }
-
     let asm_out_path = out_dir.join("out.asm");
     compile(&tokenized_program, &asm_out_path).unwrap();
 
@@ -432,15 +416,32 @@ fn main() {
         process::exit(1);
     }
 
+    let runtime_dir = std::path::Path::new("hackc/runtime");
+    let runtime_obj_path = out_dir.join("runtime.o");
+    if !run(
+        "runtime",
+        Command::new("g++")
+            .arg("-g")
+            .arg("-Wall")
+            .arg("-c")
+            .arg(runtime_dir.join("main.cpp"))
+            .arg("-o")
+            .arg(&runtime_obj_path),
+    ) {
+        println!("Well that didn't go well...");
+        process::exit(1);
+    }
+
     if !run(
         "link",
         process::Command::new("g++")
+            .arg(&runtime_obj_path)
+            .arg(&obj_out_path)
             .arg("-g")
             .arg("-no-pie")
+            .arg("-lSDL2")
             .arg("-o")
-            .arg(&executable_out_path)
-            .arg(&runtime_obj_path)
-            .arg(&obj_out_path),
+            .arg(&executable_out_path),
     ) {
         println!("Well that didn't go well...");
         process::exit(1);

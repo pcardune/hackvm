@@ -1,0 +1,27 @@
+function Sys.init 0
+
+push constant 16384
+pop pointer 0
+
+label LOOP_START
+// set 16 pixels to white
+push constant 1
+neg
+pop this 0
+// set next 16 pixels to black
+push constant 0
+pop this 1
+
+// bump pointer by 32 pixels
+push pointer 0
+push constant 2
+add
+pop pointer 0
+
+// if pointer 0 is less than 16384 + 512*256/16 = 24576
+push pointer 0
+push constant 24576
+lt
+if-goto LOOP_START
+
+return

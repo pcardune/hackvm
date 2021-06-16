@@ -169,9 +169,9 @@ enum OptimizedToken {
     },
 }
 
-struct TokenizedFunction {
-    name: String,
-    commands: Vec<Token>,
+pub struct TokenizedFunction {
+    pub name: String,
+    pub commands: Vec<Token>,
 }
 impl TokenizedFunction {
     fn from_tokens(tokens: &[Token]) -> Result<TokenizedFunction, String> {
@@ -269,9 +269,9 @@ impl TokenizedFunctionOptimized {
     }
 }
 
-struct TokenizedFile {
-    name: String,
-    functions: Vec<TokenizedFunction>,
+pub struct TokenizedFile {
+    pub name: String,
+    pub functions: Vec<TokenizedFunction>,
 }
 
 impl TokenizedFile {
@@ -291,12 +291,12 @@ impl TokenizedFile {
     }
 }
 
-struct TokenizedProgram {
-    files: Vec<TokenizedFile>,
+pub struct TokenizedProgram {
+    pub files: Vec<TokenizedFile>,
 }
 
 impl TokenizedProgram {
-    fn from_files(files: &[(&str, &str)]) -> Result<TokenizedProgram, String> {
+    pub fn from_files(files: &[(&str, &str)]) -> Result<TokenizedProgram, String> {
         let tokenized_files = files
             .iter()
             .map(|(filename, content)| {

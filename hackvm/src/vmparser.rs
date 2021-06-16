@@ -1,4 +1,5 @@
 use super::vmcommand::Segment;
+use std::fmt;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Token {
@@ -28,6 +29,41 @@ pub enum Token {
     Function(String, u16),
     Return,
     Call(String, u16),
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Token::None => "<none>".to_string(),
+            // arithmetic commands
+            Token::Neg
+            | Token::Not
+            | Token::Add
+            | Token::Sub
+            | Token::And
+            | Token::Or
+            | Token::Eq
+            | Token::Lt
+            | Token::Gt => format!("{:?}", self).to_lowercase(),
+
+            // stack commands
+            Token::Push(segment, index) => format!("push {} {}", segment, index),
+            Token::Pop(segment, index) => format!("pop {} {}", segment, index),
+
+            // goto commands
+            Token::Label(label) => format!("label {}", label),
+            Token::If(label) => format!("if-goto {}", label),
+            Token::Goto(label) => format!("goto {}", label),
+
+            // function commands
+            Token::Function(func_name, num_locals) => {
+                format!("function {} {}", func_name, num_locals)
+            }
+            Token::Return => "return".to_string(),
+            Token::Call(func_name, num_args) => format!("call {} {}", func_name, num_args),
+        };
+        f.write_str(&s)
+    }
 }
 
 fn parse_segment(s: &str) -> Result<Segment, String> {

@@ -1,49 +1,49 @@
 use anyhow::{Context, Result};
 use clap::{App, Arg};
-use hackvm::{VMCommand, VMOperation, VMProgram, VMSegment};
+use hackvm::{TokenizedProgram, VMSegment, VMToken};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{fs, process};
 
-fn compile_arithmetic(op: &VMOperation) -> String {
+fn compile_arithmetic(op: &VMToken) -> String {
     match op {
-        VMOperation::Add => "\
+        VMToken::Add => "\
             pop     rax
             pop     rbx
             add     rax, rbx
             push    rax"
             .to_string(),
-        VMOperation::Sub => "\
+        VMToken::Sub => "\
             pop     rax
             pop     rbx
             sub     rax, rbx
             push    rax"
             .to_string(),
-        VMOperation::Neg => "\
+        VMToken::Neg => "\
             pop     rax
             mov     rbx, 0
             sub     rbx, rax
             push    rbx"
             .to_string(),
-        VMOperation::Not => "\
+        VMToken::Not => "\
             pop     rax
             not     rax
             push    rax"
             .to_string(),
-        VMOperation::And => "\
+        VMToken::And => "\
             pop     rax
             pop     rbx
             and     rax, rbx
             push    rax"
             .to_string(),
-        VMOperation::Or => "\
+        VMToken::Or => "\
             pop     rax
             pop     rbx
             or      rax, rbx
             push    rax"
             .to_string(),
-        VMOperation::Eq => "\
+        VMToken::Eq => "\
             pop     rax
             pop     rbx
             cmp     rax, rbx
@@ -53,7 +53,7 @@ fn compile_arithmetic(op: &VMOperation) -> String {
             cmovne  rax, rcx
             push    rax"
             .to_string(),
-        VMOperation::Gt => "\
+        VMToken::Gt => "\
             pop     rax
             pop     rbx
             cmp     rax, rbx
@@ -63,7 +63,7 @@ fn compile_arithmetic(op: &VMOperation) -> String {
             cmovng  rax, rcx
             push    rax"
             .to_string(),
-        VMOperation::Lt => "\
+        VMToken::Lt => "\
             pop     rax
             pop     rbx
             cmp     rax, rbx
@@ -73,6 +73,7 @@ fn compile_arithmetic(op: &VMOperation) -> String {
             cmovnl  rax, rcx
             push    rax"
             .to_string(),
+        _ => panic!("Token {:?} is not arithmetic", op),
     }
 }
 
@@ -110,7 +111,7 @@ fn compile_push(segment: &VMSegment, index: &u16) -> String {
     }
 }
 
-fn compile(program: &VMProgram, output_path: &Path) -> Result<()> {
+fn compile(program: &TokenizedProgram, output_path: &Path) -> Result<()> {
     let mut file = fs::File::create(output_path).with_context(|| {
         format!(
             "Failed to create output file {}",
@@ -146,38 +147,29 @@ hack_sys_init:
     };
     for command in program.files[0].functions[0].commands.iter() {
         let asm = match command {
-            VMCommand::Function(func_ref, _num_locals) => {
-                let func_name = program.get_function_name(func_ref).unwrap();
+            VMToken::Function(func_name, _num_locals) => {
                 format!("global {}\n{}:\n", func_name, func_name)
             }
-            VMCommand::Return => "\
+            VMToken::Return => "\
                 pop      rax\n\
                 ret\n"
                 .to_string(),
-            VMCommand::Push(segment, index) => compile_push(segment, index),
-            VMCommand::Pop(segment, index) => compile_pop(segment, index),
-            VMCommand::CopySeg {
-                from_segment,
-                from_index,
-                to_segment,
-                to_index,
-            } => {
-                format!(
-                    "{}\n{}",
-                    compile_push(from_segment, from_index),
-                    compile_pop(to_segment, to_index)
-                )
-            }
-            VMCommand::Arithmetic(op) => compile_arithmetic(op),
+            VMToken::Push(segment, index) => compile_push(segment, index),
+            VMToken::Pop(segment, index) => compile_pop(segment, index),
+            VMToken::Neg
+            | VMToken::Not
+            | VMToken::Add
+            | VMToken::Sub
+            | VMToken::And
+            | VMToken::Or
+            | VMToken::Eq
+            | VMToken::Lt
+            | VMToken::Gt => compile_arithmetic(command),
             _ => panic!("Don't know how to compile {:?} yet", command),
         };
         let asm = indent(asm);
-        let comment: String = command
-            .to_string(program)
-            .split("\n")
-            .map(|s| format!("; {}\n", s))
-            .collect();
-        write!(file, "{}{}", comment, asm).context("failed writing to output file")?;
+        let comment: String = format!("; {}", command);
+        write!(file, "{}\n{}", comment, asm).context("failed writing to output file")?;
     }
     Ok(())
 }
@@ -205,15 +197,44 @@ fn run<'a>(prefix: &str, command: &'a mut Command) -> bool {
     exit_status.success()
 }
 
-fn load_vm_program(path: &str) -> Result<VMProgram, String> {
-    let file_content = fs::read_to_string(path).unwrap();
-    let filename = std::path::Path::new(path)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let files = vec![(filename, &file_content[..])];
-    VMProgram::new(&files)
+/// Traverses a directory to get a vector of paths to .vm files
+fn get_program_file_paths(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut paths: Vec<std::path::PathBuf> = vec![];
+    if path.is_file() {
+        paths.push(path.to_path_buf());
+    } else {
+        for entry in std::fs::read_dir(path).with_context(|| "Failed reading directory")? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(extension) = path.extension() {
+                    if extension == "vm" {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    return Ok(paths);
+}
+
+fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
+    let paths = get_program_file_paths(path)?;
+    let mut files: Vec<(String, String)> = vec![];
+    for path in paths.iter() {
+        let file_name = path
+            .file_name()
+            .expect("paths to be filtered for proper files already")
+            .to_string_lossy()
+            .to_string();
+        let file_content = fs::read_to_string(path).with_context(|| "Failed to read file")?;
+        files.push((file_name, file_content));
+    }
+    let mut stuff: Vec<(&str, &str)> = vec![];
+    for (file_name, file_content) in files.iter() {
+        stuff.push((&file_name, &file_content));
+    }
+    TokenizedProgram::from_files(&stuff).map_err(|e| anyhow::format_err!(e))
 }
 
 fn main() {
@@ -226,16 +247,7 @@ fn main() {
         )
         .get_matches();
     let input_file_path = matches.value_of("input").unwrap();
-    let vm_program = match load_vm_program(input_file_path) {
-        Err(msg) => {
-            println!("Failed loading program: {}", msg);
-            process::exit(1);
-        }
-        Ok(vm_program) => {
-            println!("Successfully loaded program {}", input_file_path);
-            vm_program
-        }
-    };
+    let tokenized_program = get_tokenized_program(std::path::Path::new(input_file_path)).unwrap();
 
     let out_dir = std::path::Path::new("out");
     fs::create_dir_all(out_dir).unwrap();
@@ -257,7 +269,7 @@ fn main() {
     }
 
     let asm_out_path = out_dir.join("out.asm");
-    compile(&vm_program, &asm_out_path).unwrap();
+    compile(&tokenized_program, &asm_out_path).unwrap();
 
     let obj_out_path = out_dir.join("out.o");
     let list_out_path = out_dir.join("out.lst");

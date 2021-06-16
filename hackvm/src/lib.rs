@@ -13,9 +13,11 @@ use web_sys::{CanvasRenderingContext2d, ImageData};
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 pub use vmcommand::{
-    Command as VMCommand, Operation as VMOperation, Segment as VMSegment, VMProgram,
+    Command as VMCommand, Operation as VMOperation, Segment as VMSegment, TokenizedProgram,
+    VMProgram,
 };
 pub use vmemulator::VMEmulator;
+pub use vmparser::Token as VMToken;
 
 #[wasm_bindgen]
 pub fn init_panic_hook() {

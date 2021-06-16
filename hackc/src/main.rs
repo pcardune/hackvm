@@ -237,6 +237,18 @@ hack_sys_init:
             | VMToken::Eq
             | VMToken::Lt
             | VMToken::Gt => compile_arithmetic(command),
+            VMToken::Label(label) => format!(".{}:", label),
+            VMToken::Goto(label) => format!("jmp .{}", label),
+            VMToken::If(label) => {
+                format!(
+                    "\
+                    pop      rax
+                    cmp      rax, 0
+                    je .{}
+                ",
+                    label
+                )
+            }
             _ => panic!("Don't know how to compile {:?} yet", command),
         };
         let asm = indent(asm);

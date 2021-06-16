@@ -1,10 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{App, Arg};
 use hackvm::{TokenizedProgram, VMSegment, VMToken};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::{fs, process};
+use std::{cmp, fs, process};
 
 fn compile_arithmetic(op: &VMToken) -> String {
     match op {
@@ -77,16 +78,23 @@ fn compile_arithmetic(op: &VMToken) -> String {
     }
 }
 
-fn compile_pop(segment: &VMSegment, index: &u16) -> String {
+fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
         VMSegment::Temp => {
             format!("pop     qword [RAM + {}]", (index + 5) * 8)
         }
-        _ => panic!("Don't know how to pop to segment {:?} yet", segment),
+        VMSegment::Static => {
+            format!(
+                "pop     qword [{} + {}]",
+                context.statics_var_name(),
+                index * 8
+            )
+        }
+        _ => panic!("Don't know how to pop to segment {} yet", segment),
     }
 }
 
-fn compile_push(segment: &VMSegment, index: &u16) -> String {
+fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
         VMSegment::Constant => {
             let value = index;
@@ -97,6 +105,13 @@ fn compile_push(segment: &VMSegment, index: &u16) -> String {
                 value
             )
         }
+        VMSegment::Static => {
+            format!(
+                "push     qword [{} + {}]",
+                context.statics_var_name(),
+                index * 8
+            )
+        }
         VMSegment::Temp => {
             format!(
                 "\
@@ -104,28 +119,71 @@ fn compile_push(segment: &VMSegment, index: &u16) -> String {
                 (index + 5) * 8
             )
         }
-        _ => panic!(
-            "Don't know how to compile push for segment {:?} yet",
-            segment
-        ),
+        _ => panic!("Don't know how to compile push for segment {} yet", segment),
+    }
+}
+
+fn compile_function(func_name: &str, num_locals: &u16) -> String {
+    let mut lines = vec![format!("global {}\n{}:", func_name, func_name)];
+    lines.push(format!("enter {},0", num_locals * 8));
+    lines.join("\n")
+}
+
+struct CommandContext {
+    file_name: String,
+}
+
+impl CommandContext {
+    fn statics_var_name(&self) -> String {
+        format!("{}.statics", self.file_name)
+    }
+}
+
+struct DataSection {
+    name: String,
+    table: HashMap<String, (String, String)>,
+}
+
+impl DataSection {
+    fn new(name: &str) -> DataSection {
+        DataSection {
+            name: name.to_string(),
+            table: HashMap::new(),
+        }
+    }
+    fn insert(&mut self, name: &str, data_type: &str, data_expr: &str) -> Result<()> {
+        match self.table.insert(
+            name.to_string(),
+            (data_type.to_string(), data_expr.to_string()),
+        ) {
+            None => Ok(()),
+            Some(_) => Err(anyhow!("data with name {} already exists", name)),
+        }
+    }
+    fn to_string(&self) -> String {
+        let mut lines = format!("section .{}\n", self.name);
+        for (key, val) in self.table.iter() {
+            let (data_type, data_expr) = val;
+            lines.push_str(&format!("    {:20} {:10} {}\n", key, data_type, data_expr));
+        }
+        lines.push_str("\n");
+        lines
     }
 }
 
 fn compile(program: &TokenizedProgram, output_path: &Path) -> Result<()> {
-    let mut file = fs::File::create(output_path).with_context(|| {
+    let mut output_file = fs::File::create(output_path).with_context(|| {
         format!(
             "Failed to create output file {}",
             output_path.to_string_lossy()
         )
     })?;
+    let mut data_section = DataSection::new("data");
+    data_section.insert("EXIT_SUCCESS", "equ", "0")?;
+    data_section.insert("SYS_exit", "equ", "60")?;
+    let mut bss_section = DataSection::new("bss");
+    bss_section.insert("RAM", "resq", &format!("{}", (16384 + 8192 + 1) * 8))?;
     let preamble = "
-section .data
-    EXIT_SUCCESS    equ     0
-    SYS_exit        equ     60
-
-section .bss
-    RAM             resq    16384 + 8192 + 1
-
 section .text
 
 ; Arguments Passed:
@@ -138,24 +196,38 @@ hack_sys_init:
     call Sys.init
     ret
     \n";
-    write!(file, "{}", preamble).context("Failed writing to output file")?;
     let indent = |lines: String| -> String {
         lines
             .lines()
             .map(|line| format!("\t{}\n", line.trim()))
             .collect()
     };
-    for command in program.files[0].functions[0].commands.iter() {
-        let asm = match command {
-            VMToken::Function(func_name, _num_locals) => {
-                format!("global {}\n{}:\n", func_name, func_name)
+    let mut lines: Vec<String> = vec![];
+    let file = &program.files[0];
+    let mut num_statics = 0;
+    let context = CommandContext {
+        file_name: file.name.clone(),
+    };
+    for command in file.functions[0].commands.iter() {
+        let comment: String = format!("; {}", command);
+        lines.push(comment);
+
+        num_statics = match command {
+            VMToken::Push(VMSegment::Static, index) | VMToken::Pop(VMSegment::Static, index) => {
+                cmp::max(num_statics, *index + 1)
             }
+            _ => num_statics,
+        };
+
+        let asm = match command {
+            VMToken::Function(func_name, num_locals) => compile_function(func_name, num_locals),
             VMToken::Return => "\
                 pop      rax\n\
+                leave
                 ret\n"
                 .to_string(),
-            VMToken::Push(segment, index) => compile_push(segment, index),
-            VMToken::Pop(segment, index) => compile_pop(segment, index),
+            VMToken::Push(segment, index) => compile_push(&context, segment, index),
+            VMToken::Pop(segment, index) => compile_pop(&context, segment, index),
             VMToken::Neg
             | VMToken::Not
             | VMToken::Add
@@ -168,9 +240,27 @@ hack_sys_init:
             _ => panic!("Don't know how to compile {:?} yet", command),
         };
         let asm = indent(asm);
-        let comment: String = format!("; {}", command);
-        write!(file, "{}\n{}", comment, asm).context("failed writing to output file")?;
+        lines.push(asm);
     }
+    if num_statics > 0 {
+        bss_section.insert(
+            &format!("{}.statics", file.name),
+            "resq",
+            &format!("{}", num_statics * 8),
+        )?;
+    }
+    output_file
+        .write(data_section.to_string().as_bytes())
+        .context("Failed writing data section to output file")?;
+    output_file
+        .write(bss_section.to_string().as_bytes())
+        .context("Failed writing bss section to output file")?;
+    output_file
+        .write(preamble.as_bytes())
+        .context("Failed writing preamble to output file")?;
+    output_file
+        .write(lines.join("\n").as_bytes())
+        .context("Failed writing to output file")?;
     Ok(())
 }
 

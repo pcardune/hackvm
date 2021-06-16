@@ -1,0 +1,42 @@
+function Sys.init 2
+// sum
+push constant 11
+pop static 0
+
+push constant 13
+pop static 1
+
+push static 1
+pop temp 0
+
+push static 0
+pop temp 1
+
+// // accumulator
+// push constant 0
+// pop static 1
+// // start of loop with condition
+// label LOOP
+// push static 1
+// push constant 5
+// gt
+// if-goto END_LOOP
+// 
+// // Add 3 to sum
+// push static 0
+// push constant 3
+// add
+// pop static 0
+// 
+// // Add 1 to accumulator
+// push static 1
+// push constant 1
+// add
+// pop static 1
+// 
+// label END_LOOP
+// push static 0
+// pop temp 0
+
+push constant 0
+return

@@ -4,7 +4,6 @@
 extern void hack_sys_init(long int**);
 
 int main() {
-  printf("Hello world!\n");
   long int* ram = NULL;
 
   hack_sys_init(&ram);

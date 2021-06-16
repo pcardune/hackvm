@@ -90,12 +90,27 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
                 index * 8
             )
         }
+        VMSegment::Pointer => match index {
+            0 => "pop r14".to_string(),
+            1 => "pop r15".to_string(),
+            _ => panic!("invalid index for pointer segment: {}", index),
+        },
+        VMSegment::This => format!("pop qword [RAM + r14*8 + {}]", index * 8),
+        VMSegment::That => format!("pop qword [RAM + r15*8 + {}]", index * 8),
+        VMSegment::Constant => panic!("Can't pop to constant segment"),
         _ => panic!("Don't know how to pop to segment {} yet", segment),
     }
 }
 
 fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
+        VMSegment::Pointer => match index {
+            0 => "push r14".to_string(),
+            1 => "push r15".to_string(),
+            _ => panic!("invalid index for pointer segment: {}", index),
+        },
+        VMSegment::This => "push qword [RAM + r14*8]".to_string(),
+        VMSegment::That => "push qword [RAM + r15*8]".to_string(),
         VMSegment::Constant => {
             let value = index;
             format!(

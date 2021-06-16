@@ -1,0 +1,25 @@
+function Sys.init 2
+push constant 10
+pop local 0
+push constant 11
+pop local 1
+
+call Sys.add 0
+pop temp 1
+
+push local 1
+pop temp 0
+
+push constant 0
+return
+
+function Sys.add 2
+push constant 1
+pop local 0
+push constant 2
+pop local 1
+
+push local 0
+push local 1
+add
+return

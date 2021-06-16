@@ -90,6 +90,7 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
                 index * 8
             )
         }
+        VMSegment::Local => format!("pop qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "pop r14".to_string(),
             1 => "pop r15".to_string(),
@@ -104,6 +105,7 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
 
 fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
+        VMSegment::Local => format!("push qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "push r14".to_string(),
             1 => "push r15".to_string(),
@@ -139,9 +141,27 @@ fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> S
 }
 
 fn compile_function(func_name: &str, num_locals: &u16) -> String {
-    let mut lines = vec![format!("global {}\n{}:", func_name, func_name)];
-    lines.push(format!("enter {},0", num_locals * 8));
-    lines.join("\n")
+    let mut lines: String = String::new();
+    lines.push_str(&format!("global {}\n{}:\n", func_name, func_name));
+    lines.push_str(&format!("enter  {},0\n", num_locals * 8));
+    for i in 0..*num_locals {
+        lines.push_str(&format!("mov qword [rbp-{}], 0\n", (i + 1) * 8));
+    }
+    lines
+}
+
+fn compile_call(func_name: &str, _num_args: &u16) -> String {
+    let mut lines = format!("call {}\n", func_name);
+    lines.push_str("push rax");
+    lines
+}
+
+fn compile_return() -> String {
+    "\
+    pop rax
+    leave
+    ret\n"
+        .to_string()
 }
 
 struct CommandContext {
@@ -223,52 +243,51 @@ hack_sys_init:
     let context = CommandContext {
         file_name: file.name.clone(),
     };
-    for command in file.functions[0].commands.iter() {
-        let comment: String = format!("; {}", command);
-        lines.push(comment);
+    for function in file.functions.iter() {
+        for command in function.commands.iter() {
+            let comment: String = format!("; {}", command);
+            lines.push(comment);
 
-        num_statics = match command {
-            VMToken::Push(VMSegment::Static, index) | VMToken::Pop(VMSegment::Static, index) => {
-                cmp::max(num_statics, *index + 1)
-            }
-            _ => num_statics,
-        };
+            num_statics = match command {
+                VMToken::Push(VMSegment::Static, index)
+                | VMToken::Pop(VMSegment::Static, index) => cmp::max(num_statics, *index + 1),
+                _ => num_statics,
+            };
 
-        let asm = match command {
-            VMToken::Function(func_name, num_locals) => compile_function(func_name, num_locals),
-            VMToken::Return => "\
-                pop      rax\n\
-                leave
-                ret\n"
-                .to_string(),
-            VMToken::Push(segment, index) => compile_push(&context, segment, index),
-            VMToken::Pop(segment, index) => compile_pop(&context, segment, index),
-            VMToken::Neg
-            | VMToken::Not
-            | VMToken::Add
-            | VMToken::Sub
-            | VMToken::And
-            | VMToken::Or
-            | VMToken::Eq
-            | VMToken::Lt
-            | VMToken::Gt => compile_arithmetic(command),
-            VMToken::Label(label) => format!(".{}:", label),
-            VMToken::Goto(label) => format!("jmp .{}", label),
-            VMToken::If(label) => {
-                format!(
-                    "\
+            let asm = match command {
+                VMToken::Call(func_name, num_args) => compile_call(func_name, num_args),
+                VMToken::Function(func_name, num_locals) => compile_function(func_name, num_locals),
+                VMToken::Return => compile_return(),
+                VMToken::Push(segment, index) => compile_push(&context, segment, index),
+                VMToken::Pop(segment, index) => compile_pop(&context, segment, index),
+                VMToken::Neg
+                | VMToken::Not
+                | VMToken::Add
+                | VMToken::Sub
+                | VMToken::And
+                | VMToken::Or
+                | VMToken::Eq
+                | VMToken::Lt
+                | VMToken::Gt => compile_arithmetic(command),
+                VMToken::Label(label) => format!(".{}:", label),
+                VMToken::Goto(label) => format!("jmp .{}", label),
+                VMToken::If(label) => {
+                    format!(
+                        "\
                     pop      rax
                     cmp      rax, 0
                     je .{}
                 ",
-                    label
-                )
-            }
-            _ => panic!("Don't know how to compile {:?} yet", command),
-        };
-        let asm = indent(asm);
-        lines.push(asm);
+                        label
+                    )
+                }
+                _ => panic!("Don't know how to compile {:?} yet", command),
+            };
+            let asm = indent(asm);
+            lines.push(asm);
+        }
     }
+
     if num_statics > 0 {
         bss_section.insert(
             &format!("{}.statics", file.name),

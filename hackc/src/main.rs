@@ -90,6 +90,7 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
                 index * 8
             )
         }
+        VMSegment::Argument => format!("pop qword [rbp + {}]", (index + 2) * 8),
         VMSegment::Local => format!("pop qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "pop r14".to_string(),
@@ -99,12 +100,12 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
         VMSegment::This => format!("pop qword [RAM + r14*8 + {}]", index * 8),
         VMSegment::That => format!("pop qword [RAM + r15*8 + {}]", index * 8),
         VMSegment::Constant => panic!("Can't pop to constant segment"),
-        _ => panic!("Don't know how to pop to segment {} yet", segment),
     }
 }
 
 fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
+        VMSegment::Argument => format!("push qword [rbp + {}]", (index + 2) * 8),
         VMSegment::Local => format!("push qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "push r14".to_string(),
@@ -136,7 +137,6 @@ fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> S
                 (index + 5) * 8
             )
         }
-        _ => panic!("Don't know how to compile push for segment {} yet", segment),
     }
 }
 
@@ -281,7 +281,7 @@ hack_sys_init:
                         label
                     )
                 }
-                _ => panic!("Don't know how to compile {:?} yet", command),
+                VMToken::None => "".to_string(),
             };
             let asm = indent(asm);
             lines.push(asm);

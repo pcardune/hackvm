@@ -4,7 +4,7 @@ function Sys.init 0
 push constant 10
 push constant 12
 add
-pop temp 0 // RAM[5] == 16
+pop temp 0 // RAM[5] == 22
 
 // 9 - 7 = 2
 push constant 7

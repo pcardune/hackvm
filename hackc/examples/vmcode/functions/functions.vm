@@ -10,6 +10,11 @@ pop temp 1
 push local 1
 pop temp 0
 
+push constant 52
+push constant 73
+call Sys.sub 2
+pop temp 2
+
 push constant 0
 return
 
@@ -22,4 +27,10 @@ pop local 1
 push local 0
 push local 1
 add
+return
+
+function Sys.sub 0
+push argument 0
+push argument 1
+sub
 return

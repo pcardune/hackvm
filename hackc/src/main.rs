@@ -16,8 +16,8 @@ fn compile_arithmetic(op: &VMToken) -> String {
             push    rax"
             .to_string(),
         VMToken::Sub => "\
-            pop     rax
             pop     rbx
+            pop     rax
             sub     rax, rbx
             push    rax"
             .to_string(),
@@ -150,9 +150,12 @@ fn compile_function(func_name: &str, num_locals: &u16) -> String {
     lines
 }
 
-fn compile_call(func_name: &str, _num_args: &u16) -> String {
+fn compile_call(func_name: &str, num_args: &u16) -> String {
     let mut lines = format!("call {}\n", func_name);
-    lines.push_str("push rax");
+    for _ in 0..*num_args {
+        lines.push_str("pop rbx\n");
+    }
+    lines.push_str("push rax\n");
     lines
 }
 
@@ -276,10 +279,10 @@ hack_sys_init:
                     VMToken::If(label) => {
                         format!(
                             "\
-                    pop      rax
-                    cmp      rax, 0
-                    je .{}
-                ",
+                                pop      rax
+                                cmp      rax, 0
+                                jne .{}
+                            ",
                             label
                         )
                     }
@@ -437,6 +440,8 @@ fn main() {
         process::Command::new("g++")
             .arg(&runtime_obj_path)
             .arg(&obj_out_path)
+            .arg("-std=c++11")
+            .arg("-pthread")
             .arg("-g")
             .arg("-no-pie")
             .arg("-lSDL2")

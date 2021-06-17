@@ -55,8 +55,8 @@ fn compile_arithmetic(op: &VMToken) -> String {
             push    rax"
             .to_string(),
         VMToken::Gt => "\
-            pop     rax
             pop     rbx
+            pop     rax
             cmp     rax, rbx
             mov     rcx, -1
             cmovg   rax, rcx
@@ -65,8 +65,8 @@ fn compile_arithmetic(op: &VMToken) -> String {
             push    rax"
             .to_string(),
         VMToken::Lt => "\
-            pop     rax
             pop     rbx
+            pop     rax
             cmp     rax, rbx
             mov     rcx, -1
             cmovl   rax, rcx

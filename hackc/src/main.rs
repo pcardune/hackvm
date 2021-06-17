@@ -90,7 +90,12 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
                 index * 8
             )
         }
-        VMSegment::Argument => format!("pop qword [rbp + {}]", (index + 2) * 8),
+        VMSegment::Argument => format!(
+            "\
+            mov rax, qword [rbp + 2*8]
+            pop qword [rbp + 2*8 + rax*8 - {}*8]",
+            index
+        ),
         VMSegment::Local => format!("pop qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "pop r14".to_string(),
@@ -105,7 +110,12 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
 
 fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
-        VMSegment::Argument => format!("push qword [rbp + {}]", (index + 2) * 8),
+        VMSegment::Argument => format!(
+            "\
+            mov rax, qword [rbp + 2*8]
+            push qword [rbp + 2*8 + rax*8 - {}*8]",
+            index
+        ),
         VMSegment::Local => format!("push qword [rbp - {}]", (index + 1) * 8),
         VMSegment::Pointer => match index {
             0 => "push r14".to_string(),
@@ -151,8 +161,13 @@ fn compile_function(func_name: &str, num_locals: &u16) -> String {
 }
 
 fn compile_call(func_name: &str, num_args: &u16) -> String {
-    let mut lines = format!("call {}\n", func_name);
-    for _ in 0..*num_args {
+    let mut lines = String::new();
+    // push the number of arguments onto the stack
+    lines.push_str(&format!("mov rdx, {}\n", num_args));
+    lines.push_str("push rdx\n");
+
+    lines.push_str(&format!("call {}\n", func_name));
+    for _ in 0..(*num_args + 1) {
         lines.push_str("pop rbx\n");
     }
     lines.push_str("push rax\n");

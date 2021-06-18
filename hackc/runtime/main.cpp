@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <thread>
 #include <SDL2/SDL.h>
 
 extern "C" void hack_sys_init(long int**);
@@ -11,13 +12,17 @@ const int SCREEN_HEIGHT = 256;
 int main() {
   long int* ram = NULL;
 
-  hack_sys_init(&ram);
+  std::thread runner(hack_sys_init, &ram);
+  // hack_sys_init(&ram);
+  while (ram == NULL) {}
+  show_window(ram + 16384);
+
   printf("output is (at %p):\n", ram);
   for (int i = 0; i < 16; i++) {
     printf("  [%2i] = %ld\n", i, ram[i]);
   }
 
-  show_window(ram + 16384);
+  // runner.join();
   exit(EXIT_SUCCESS);
 }
 
@@ -62,10 +67,6 @@ bool init()
 
 void closeWindow()
 {
-  //Deallocate surface
-  // SDL_FreeSurface(gHelloWorld);
-  // gHelloWorld = NULL;
-
   //Destroy window
   SDL_DestroyWindow(gWindow);
   gWindow = NULL;
@@ -89,8 +90,6 @@ void show_window(long int* ram) {
     //Event handler
     SDL_Event e;
 
-    int offset = 0;
-
     //While application is running
     while (!quit)
     {
@@ -106,29 +105,6 @@ void show_window(long int* ram) {
         else if (e.type == SDL_KEYDOWN)
         {
           printf("Pressed key %s\n", SDL_GetKeyName(e.key.keysym.sym));
-          SDL_LockSurface(gScreenSurface);
-          Uint32* pixels = (Uint32*)gScreenSurface->pixels;
-          Uint32 black = SDL_MapRGB(gScreenSurface->format, 0xFF, 0x11, 0x22);
-          Uint32 white = SDL_MapRGB(gScreenSurface->format, 0x55, 0xFF, 0xFF);
-
-          int p = 0;
-          for (int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH / 16; i++) {
-            Uint16 block = ram[i];
-            for (int j = 0; j < 16; j++) {
-              if (block & 1 << j > 0) {
-                pixels[p++] = black;
-              }
-              else {
-                pixels[p++] = white;
-              }
-            }
-          }
-
-          pixels[offset] = black;
-          Uint32 index = pixels[offset];
-          offset += 2;
-          SDL_UnlockSurface(gScreenSurface);
-          printf("pixel is: %xd. bits per pixel: %d\n", index, gScreenSurface->format->BitsPerPixel);
           if (e.key.keysym.sym == SDLK_DOWN) {
             //Fill the surface white
             SDL_FillRect(gScreenSurface, NULL, SDL_MapRGB(gScreenSurface->format, 0xAA, 0xFF, 0x33));
@@ -136,6 +112,25 @@ void show_window(long int* ram) {
         }
       }
 
+      SDL_LockSurface(gScreenSurface);
+      Uint32* pixels = (Uint32*)gScreenSurface->pixels;
+      Uint32 black = SDL_MapRGB(gScreenSurface->format, 0xFF, 0x11, 0x22);
+      Uint32 white = SDL_MapRGB(gScreenSurface->format, 0x55, 0xFF, 0xFF);
+
+      int p = 0;
+      for (int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH / 16; i++) {
+        Uint16 block = ram[i];
+        for (int j = 0; j < 16; j++) {
+          if ((block & 1 << j) > 0) {
+            pixels[p++] = black;
+          }
+          else {
+            pixels[p++] = white;
+          }
+        }
+      }
+      SDL_UnlockSurface(gScreenSurface);
+      // printf("pixel is: %xd. bits per pixel: %d\n", index, gScreenSurface->format->BitsPerPixel);
 
       //Update the surface
       SDL_UpdateWindowSurface(gWindow);

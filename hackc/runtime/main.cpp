@@ -3,7 +3,7 @@
 #include <thread>
 #include <SDL2/SDL.h>
 
-extern "C" void hack_sys_init(long int**);
+extern "C" long int hack_sys_init(long int**);
 void show_window(long int*);
 
 const int SCREEN_WIDTH = 512;

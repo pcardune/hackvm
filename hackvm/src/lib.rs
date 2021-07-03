@@ -16,7 +16,7 @@ pub use vmcommand::{
     Command as VMCommand, Operation as VMOperation, Segment as VMSegment, TokenizedProgram,
     VMProgram,
 };
-pub use vmemulator::VMEmulator;
+pub use vmemulator::{EmulatorRAM as VMEmulatorRAM, VMEmulator};
 pub use vmparser::Token as VMToken;
 
 #[wasm_bindgen]

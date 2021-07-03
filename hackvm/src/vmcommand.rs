@@ -368,11 +368,11 @@ impl VMProgram {
         }
     }
 
-    pub fn new(files: &Vec<(&str, &str)>) -> Result<VMProgram, String> {
+    pub fn new(files: &[(&str, &str)]) -> Result<VMProgram, String> {
         VMProgram::with_internals(files, None)
     }
     pub fn with_internals(
-        files: &Vec<(&str, &str)>,
+        files: &[(&str, &str)],
         internal_funcs: Option<HashMap<&'static str, FunctionRef>>,
     ) -> Result<VMProgram, String> {
         let tokenized_program = TokenizedProgram::from_files(files)

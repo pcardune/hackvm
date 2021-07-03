@@ -3,7 +3,7 @@ use clap::{App, Arg};
 use hackvm::{TokenizedProgram, VMSegment, VMToken};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{cmp, fs, process};
 
@@ -224,7 +224,7 @@ impl DataSection {
     }
 }
 
-fn compile(program: &TokenizedProgram, output_path: &Path) -> Result<()> {
+fn compile_vm_to_asm(program: &TokenizedProgram, output_path: &Path) -> Result<()> {
     let mut output_file = fs::File::create(output_path).with_context(|| {
         format!(
             "Failed to create output file {}",
@@ -394,27 +394,9 @@ fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
     TokenizedProgram::from_files(&stuff).map_err(|e| anyhow::format_err!(e))
 }
 
-fn main() {
-    let matches = App::new("hackc")
-        .arg(
-            Arg::with_name("input")
-                .required(true)
-                .short("i")
-                .takes_value(true),
-        )
-        .get_matches();
-    let input_file_path = matches.value_of("input").unwrap();
-    let tokenized_program = get_tokenized_program(std::path::Path::new(input_file_path)).unwrap();
-
-    let out_dir = std::path::Path::new("out");
-    fs::create_dir_all(out_dir).unwrap();
-
-    let asm_out_path = out_dir.join("out.asm");
-    compile(&tokenized_program, &asm_out_path).unwrap();
-
+fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {
     let obj_out_path = out_dir.join("out.o");
     let list_out_path = out_dir.join("out.lst");
-    let executable_out_path = out_dir.join("out");
     if !run(
         "assemble",
         Command::new("yasm")
@@ -431,24 +413,60 @@ fn main() {
             .arg(&list_out_path),
     ) {
         println!("Well that didn't go well...");
-        process::exit(1);
+        return Err(anyhow!(
+            "Failed to assemble {}",
+            asm_out_path.to_string_lossy()
+        ));
+    }
+    return Ok(obj_out_path);
+}
+
+struct Runtime {
+    cpp_file: PathBuf,
+}
+
+impl Runtime {
+    fn default() -> Runtime {
+        Runtime {
+            cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/main.cpp"),
+        }
     }
 
-    let runtime_dir = std::path::Path::new("hackc/runtime");
-    let runtime_obj_path = out_dir.join("runtime.o");
-    if !run(
-        "runtime",
-        Command::new("g++")
+    fn debug() -> Runtime {
+        Runtime {
+            cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"),
+        }
+    }
+
+    fn compile(&self, out_dir: &Path) -> Result<PathBuf> {
+        let runtime_obj_path = out_dir.join("runtime.o");
+        let mut command = Command::new("g++");
+        command
             .arg("-g")
             .arg("-Wall")
             .arg("-c")
-            .arg(runtime_dir.join("main.cpp"))
+            .arg(&self.cpp_file)
             .arg("-o")
-            .arg(&runtime_obj_path),
-    ) {
-        println!("Well that didn't go well...");
-        process::exit(1);
+            .arg(&runtime_obj_path);
+
+        if !run("runtime", &mut command) {
+            println!("Well that didn't go well...");
+            return Err(anyhow!(
+                "Failed to compile runtime {} with command {:?}",
+                self.cpp_file.to_string_lossy(),
+                command
+            ));
+        }
+        return Ok(runtime_obj_path);
     }
+}
+
+fn link_executable(
+    out_dir: &Path,
+    runtime_obj_path: &Path,
+    obj_out_path: &Path,
+) -> Result<PathBuf> {
+    let executable_out_path = out_dir.join("out");
 
     if !run(
         "link",
@@ -464,6 +482,245 @@ fn main() {
             .arg(&executable_out_path),
     ) {
         println!("Well that didn't go well...");
-        process::exit(1);
+        return Err(anyhow!("Failed to link executable"));
+    }
+    return Ok(executable_out_path);
+}
+
+struct Executable {
+    input_path: PathBuf,
+    out_dir: PathBuf,
+    runtime: Runtime,
+}
+
+impl Executable {
+    fn new(input_path: &Path, out_dir: &Path) -> Executable {
+        Executable {
+            input_path: input_path.to_path_buf(),
+            out_dir: out_dir.to_path_buf(),
+            runtime: Runtime::default(),
+        }
+    }
+
+    fn runtime(mut self, runtime: Runtime) -> Executable {
+        self.runtime = runtime;
+        self
+    }
+
+    fn compile(&self) -> Result<PathBuf> {
+        let tokenized_program = get_tokenized_program(&self.input_path)?;
+
+        let asm_out_path = self.out_dir.join("out.asm");
+        compile_vm_to_asm(&tokenized_program, &asm_out_path)?;
+
+        let obj_out_path = assemble(&self.out_dir, &asm_out_path)?;
+        let runtime_obj_path = self.runtime.compile(&self.out_dir)?;
+
+        return link_executable(&self.out_dir, &runtime_obj_path, &obj_out_path);
+    }
+}
+
+fn exec_vm(executable_path: &Path) -> Result<bool> {
+    let mut child = process::Command::new(executable_path).spawn()?;
+    let exit_status = child.wait()?;
+    Ok(exit_status.success())
+}
+
+fn main() {
+    let matches = App::new("hackc")
+        .arg(
+            Arg::with_name("input")
+                .required(true)
+                .short("i")
+                .takes_value(true),
+        )
+        .arg(Arg::with_name("exec").long("exec"))
+        .get_matches();
+    let input_file_path = matches.value_of("input").unwrap();
+    let out_dir = Path::new("out");
+
+    fs::create_dir_all(out_dir).unwrap();
+    let executable_path = Executable::new(Path::new(input_file_path), out_dir)
+        .runtime(Runtime::debug())
+        .compile()
+        .unwrap();
+
+    if matches.is_present("exec") {
+        exec_vm(&executable_path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hash::Hash;
+
+    use super::*;
+
+    struct TestCaseResult<'a> {
+        test_case: TestCase<'a>,
+        interpreter_ram: hackvm::VMEmulatorRAM,
+        compiled_ram: Vec<i64>,
+        interpreter_return: i32,
+        compiled_return: std::process::ExitStatus,
+    }
+
+    impl<'a> TestCaseResult<'a> {
+        fn assert_return_eq(&self, expected: i32) {
+            if let Some(code) = self.compiled_return.code() {
+                if code != self.interpreter_return {
+                    panic!(
+                        "Interpreted and compiled return codes don't agree: {} != {}",
+                        self.interpreter_return, code
+                    );
+                } else if code != expected {
+                    panic!(
+                        "Interpreted and compiled return codes were unexpected: {} != {}",
+                        self.interpreter_return, expected
+                    );
+                }
+            } else {
+                panic!("Compiled code was terminated by signal")
+            }
+        }
+        fn assert_ram_eq(&self, start: usize, end: usize) {
+            let mut failures: Vec<usize> = vec![];
+            for i in start..end {
+                if self.interpreter_ram[i] != self.compiled_ram[i] as i32 {
+                    failures.push(i);
+                }
+            }
+            if failures.len() > 0 {
+                let message = failures
+                    .into_iter()
+                    .map(|i| {
+                        format!(
+                            "  [{}] {} != {}",
+                            i, self.interpreter_ram[i], self.compiled_ram[i]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                panic!("Interpreted and compiled results don't agree:\n{}", message);
+            }
+        }
+    }
+
+    struct TestCase<'a> {
+        files: Vec<(&'a str, &'a str)>,
+        max_steps: usize,
+        ram_size: usize,
+    }
+    impl<'a> TestCase<'a> {
+        fn with_code(code: &'a str) -> TestCase<'a> {
+            TestCase {
+                files: vec![("Sys.vm", code)],
+                max_steps: 1000,
+                ram_size: 20,
+            }
+        }
+
+        fn ram_size(mut self, size: usize) -> TestCase<'a> {
+            self.ram_size = size;
+            self
+        }
+
+        fn run(self) -> Result<TestCaseResult<'a>> {
+            let (interpreter_return, interpreter_ram) = self.run_interpreter()?;
+            let (compiled_return, compiled_ram) = self.run_compiled()?;
+            Ok(TestCaseResult {
+                test_case: self,
+                interpreter_ram,
+                interpreter_return,
+                compiled_ram,
+                compiled_return,
+            })
+        }
+
+        fn run_interpreter(&self) -> Result<(i32, hackvm::VMEmulatorRAM)> {
+            let program = hackvm::VMProgram::new(&self.files).unwrap();
+            let mut vm = hackvm::VMEmulator::new(program);
+            let return_code = vm.run(self.max_steps).map_err(|e| anyhow!(e))?;
+            Ok((return_code, vm.into_ram()))
+        }
+
+        fn get_hash_string(&self) -> String {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::Hasher;
+            let mut state = DefaultHasher::new();
+            for (name, code) in self.files.iter() {
+                name.hash(&mut state);
+                code.hash(&mut state);
+            }
+            let hash = state.finish();
+            hash.to_string()
+        }
+
+        fn run_compiled(&self) -> Result<(std::process::ExitStatus, Vec<i64>)> {
+            let out_dir = Path::new("/tmp/hackc").join(self.get_hash_string());
+            let program_dir = out_dir.join("program");
+            fs::create_dir_all(&program_dir).with_context(|| "Failed creating temp directory")?;
+            for (name, code) in self.files.iter() {
+                fs::write(program_dir.join(name), code)
+                    .with_context(|| "Failed writing vmcode to disk")?;
+            }
+            let executable_path = Executable::new(&program_dir, &out_dir)
+                .runtime(Runtime::debug())
+                .compile()
+                .with_context(|| "Failed compiling executable")?;
+            let output = process::Command::new(executable_path)
+                .arg("1")
+                .arg(self.ram_size.to_string())
+                .output()
+                .with_context(|| "Failed spawning executable")?;
+            let stdout = String::from_utf8(output.stdout)
+                .with_context(|| "Failed converting output to utf8")?;
+            let mut ram = vec![-1; self.ram_size];
+            stdout.lines().for_each(|line| {
+                let mut parts = line.split(":");
+                if let Some(index) = parts.next() {
+                    if let Some(value) = parts.next() {
+                        if let Ok(index) = index.parse::<usize>() {
+                            if let Ok(value) = value.parse() {
+                                ram[index] = value;
+                            }
+                        }
+                    }
+                }
+            });
+            Ok((output.status, ram))
+        }
+    }
+
+    #[test]
+    fn test_temp_segment() {
+        let code = "
+            function Sys.init 0
+                push constant 10
+                pop temp 0
+                push constant 12
+                pop temp 7
+                push temp 7
+            return
+        ";
+        let result = TestCase::with_code(code).run().unwrap();
+        result.assert_ram_eq(5, 5 + 8);
+        result.assert_return_eq(12);
+        assert_eq!(result.compiled_ram[5], 10);
+    }
+
+    #[test]
+    fn test_add() {
+        TestCase::with_code(
+            "
+            function Sys.init 0
+            push constant 10
+            push constant 12
+            add
+            return
+        ",
+        )
+        .run()
+        .unwrap()
+        .assert_return_eq(22);
     }
 }

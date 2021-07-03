@@ -111,9 +111,11 @@ const INTERNALS: [InternalFunction; 2] = [
     },
 ];
 
+pub type EmulatorRAM = [i32; RAM_SIZE];
+
 pub struct VMEmulator {
     program: VMProgram,
-    ram: [i32; RAM_SIZE],
+    ram: EmulatorRAM,
     call_stack: Vec<VMStackFrame>,
     step_counter: usize,
     profiler: VMProfiler,
@@ -155,6 +157,10 @@ impl VMEmulator {
 
     pub fn ram(&self) -> &[i32] {
         &self.ram
+    }
+
+    pub fn into_ram(self) -> EmulatorRAM {
+        self.ram
     }
 
     pub fn reset(&mut self) {

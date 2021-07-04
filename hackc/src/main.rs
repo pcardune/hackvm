@@ -630,12 +630,15 @@ mod tests {
         ram_size: usize,
     }
     impl<'a> TestCase<'a> {
-        fn with_code(code: &'a str) -> TestCase<'a> {
+        fn with_files(files: Vec<(&'a str, &'a str)>) -> TestCase<'a> {
             TestCase {
-                files: vec![("Sys.vm", code)],
+                files,
                 max_steps: 1000,
                 ram_size: 20,
             }
+        }
+        fn with_code(code: &'a str) -> TestCase<'a> {
+            Self::with_files(vec![("Sys.vm", code)])
         }
 
         fn ram_size(mut self, size: usize) -> TestCase<'a> {
@@ -719,121 +722,320 @@ mod tests {
         }
     }
 
-    #[test]
-    #[serial]
-    fn test_temp_segment() {
-        let code = "
-            function Sys.init 0
-                push constant 10
-                pop temp 0
-                push constant 12
-                pop temp 7
-                push temp 7
-            return
-        ";
-        let result = TestCase::with_code(code).run();
-        result.assert_ram_eq(5, 5 + 8);
-        result.assert_return_eq(12);
-        assert_eq!(result.compiled_ram()[5], 10);
+    mod segements {
+        use super::*;
+        #[test]
+        #[serial]
+        fn test_temp_segment() {
+            let code = "
+                function Sys.init 0
+                    push constant 10
+                    pop temp 0
+                    push constant 12
+                    pop temp 7
+                    push temp 7
+                return
+            ";
+            let result = TestCase::with_code(code).run();
+            result.assert_ram_eq(5, 5 + 8);
+            result.assert_return_eq(12);
+            assert_eq!(result.compiled_ram()[5], 10);
+        }
+
+        #[test]
+        #[serial]
+        fn test_this_that_pointer_segments() {
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 1000
+                    pop pointer 0
+                    push constant 1050
+                    pop pointer 1
+                    push constant 3
+                    pop this 0
+                    push constant 5
+                    pop this 1
+                    push constant 2
+                    pop that 0
+                    push constant 4
+                    pop that 1
+                    push constant 0
+                return
+            ",
+            )
+            .ram_size(2000)
+            .run()
+            .assert_ram_eq(1000, 1003)
+            .assert_ram_eq(1050, 1060);
+        }
+
+        #[test]
+        #[serial]
+        fn test_static_segment_across_functions() {
+            // The static segment is shared across
+            // all functions within a given file
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 10
+                    pop static 0
+                    call Sys.changeStatic 0
+                    pop temp 0
+                    push static 0
+                return
+
+                function Sys.changeStatic 0
+                    push constant 12
+                    pop static 0
+                    push constant 0
+                return
+                ",
+            )
+            .run()
+            .assert_return_eq(12);
+        }
+
+        #[test]
+        #[serial]
+        fn test_static_segment_across_files() {
+            // Each file gets its own static segment
+            TestCase::with_files(vec![
+                (
+                    "Sys.vm",
+                    "
+                    function Sys.init 0
+                        push constant 10
+                        pop static 0
+                        call Other.changeStatic 0
+                        pop temp 0
+                        push static 0
+                    return
+                    ",
+                ),
+                (
+                    "Other.vm",
+                    "
+                    function Other.changeStatic 0
+                        push constant 12
+                        pop static 0
+                        push constant 0
+                    return
+                    ",
+                ),
+            ])
+            .run()
+            .assert_return_eq(10);
+        }
+
+        #[test]
+        #[serial]
+        fn test_local_segment_across_functions() {
+            // Each function gets its own local segment,
+            // so the changes made in changeAnotherLocal
+            // should not affect the local from changeLocal
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    call Sys.changeLocal 0
+                return
+
+                function Sys.changeLocal 1
+                    push constant 10
+                    pop local 0
+                    call Sys.changeAnotherLocal 0
+                    pop temp 0
+                    push local 0
+                return
+
+                function Sys.changeAnotherLocal 1
+                    push constant 12
+                    pop local 0
+                    push constant 0
+                return
+                ",
+            )
+            .run()
+            .assert_return_eq(10);
+        }
+
+        #[test]
+        #[serial]
+        fn test_argument_segment() {
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 10
+                    push constant 12
+                    call Sys.subArgs 2
+                return
+
+                function Sys.subArgs 0
+                    push argument 0
+                    push argument 1
+                    sub
+                return
+                ",
+            )
+            .run()
+            .assert_return_eq(-2);
+        }
     }
 
-    #[test]
-    #[serial]
-    fn test_this_that_pointer_segments() {
-        TestCase::with_code(
-            "
-            function Sys.init 0
-                push constant 1000
-                pop pointer 0
-                push constant 1050
-                pop pointer 1
-                push constant 3
-                pop this 0
-                push constant 5
-                pop this 1
-                push constant 2
-                pop that 0
-                push constant 4
-                pop that 1
-                push constant 0
-            return
-        ",
-        )
-        .ram_size(2000)
-        .run()
-        .assert_ram_eq(1000, 1003)
-        .assert_ram_eq(1050, 1060);
+    mod branching {
+        use super::*;
+        #[test]
+        #[serial]
+        fn test_goto() {
+            // goto should unconditionally jump to the specified label,
+            // skipping whatever code is inbetween
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 10
+                    goto THE_END
+                    push constant 12
+                    label THE_END
+                    push constant 5
+                    add
+                return
+                ",
+            )
+            .run()
+            .assert_return_eq(15);
+        }
+
+        #[test]
+        #[serial]
+        fn test_labels_are_function_scoped() {
+            // labels are scoped to the function they are defined in,
+            // so goto THE_END in Sys.init goes to label THE_END in Sys.init
+            // and not in Sys.other
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 10
+                    goto THE_END
+                    push constant 12
+                    label THE_END
+                    push constant 5
+                    add
+                    call Sys.other 0
+                    add
+                return
+
+                function Sys.other 0
+                    push constant 20
+                    goto THE_END
+                    push constant 32
+                    label THE_END
+                    push constant 15
+                    add
+                return
+                ",
+            )
+            .run()
+            .assert_return_eq(50);
+        }
+
+        #[test]
+        #[serial]
+        fn test_if_goto() {
+            let code = |cond: &str| {
+                format!(
+                    "
+                function Sys.init 0
+                    push constant 100
+                    push constant 10
+                    push constant 12
+                    {}
+                    if-goto THE_END
+                    push constant 12
+                    label THE_END
+                    push constant 5
+                    add
+                return
+                ",
+                    cond
+                )
+            };
+            TestCase::with_code(&code("gt")).run().assert_return_eq(17);
+            TestCase::with_code(&code("lt")).run().assert_return_eq(105);
+        }
     }
 
-    fn test_arithmetic(a: u32, b: u32, op: &str, expected: i32) {
-        TestCase::with_code(&format!(
-            "
-            function Sys.init 0
-            push constant {}
-            push constant {}
-            {}
-            return
-        ",
-            a, b, op
-        ))
-        .run()
-        .assert_return_eq(expected);
-    }
+    mod arithmetic {
+        use super::*;
+        fn test_arithmetic(a: u32, b: u32, op: &str, expected: i32) {
+            TestCase::with_code(&format!(
+                "
+                    function Sys.init 0
+                    push constant {}
+                    push constant {}
+                    {}
+                    return
+                ",
+                a, b, op
+            ))
+            .run()
+            .assert_return_eq(expected);
+        }
 
-    #[test]
-    #[serial]
-    fn test_add() {
-        test_arithmetic(10, 12, "add", 22);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_add() {
+            test_arithmetic(10, 12, "add", 22);
+        }
 
-    #[test]
-    #[serial]
-    fn test_sub() {
-        test_arithmetic(7, 9, "sub", -2);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_sub() {
+            test_arithmetic(7, 9, "sub", -2);
+        }
 
-    #[test]
-    #[serial]
-    fn test_neg() {
-        test_arithmetic(7, 8, "neg", -8);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_neg() {
+            test_arithmetic(7, 8, "neg", -8);
+        }
 
-    #[test]
-    #[serial]
-    fn test_not() {
-        test_arithmetic(7, 5, "not", -6);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_not() {
+            test_arithmetic(7, 5, "not", -6);
+        }
 
-    #[test]
-    #[serial]
-    fn test_and() {
-        test_arithmetic(21, 25, "and", 17);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_and() {
+            test_arithmetic(21, 25, "and", 17);
+        }
 
-    #[test]
-    #[serial]
-    fn test_or() {
-        test_arithmetic(21, 25, "or", 29);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_or() {
+            test_arithmetic(21, 25, "or", 29);
+        }
 
-    #[test]
-    #[serial]
-    fn test_eq() {
-        test_arithmetic(21, 23, "eq", 0);
-        test_arithmetic(21, 21, "eq", -1);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_eq() {
+            test_arithmetic(21, 23, "eq", 0);
+            test_arithmetic(21, 21, "eq", -1);
+        }
 
-    #[test]
-    #[serial]
-    fn test_lt() {
-        test_arithmetic(21, 23, "lt", -1);
-        test_arithmetic(23, 21, "lt", 0);
-    }
+        #[test]
+        #[serial]
+        fn test_arithmetic_lt() {
+            test_arithmetic(21, 23, "lt", -1);
+            test_arithmetic(23, 21, "lt", 0);
+        }
 
-    #[test]
-    #[serial]
-    fn test_gt() {
-        test_arithmetic(21, 23, "gt", 0);
-        test_arithmetic(23, 21, "gt", -1);
+        #[test]
+        #[serial]
+        fn test_arithmetic_gt() {
+            test_arithmetic(21, 23, "gt", 0);
+            test_arithmetic(23, 21, "gt", -1);
+        }
     }
 }

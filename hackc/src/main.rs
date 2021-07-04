@@ -581,7 +581,7 @@ mod tests {
         fn interpreter_ram(&self) -> &hackvm::VMEmulatorRAM {
             &self.interpreter_result.as_ref().unwrap().1
         }
-        fn assert_return_eq(&self, expected: i32) {
+        fn assert_return_eq(&self, expected: i32) -> &TestCaseResult {
             let code = self.compiled_return();
             if code != self.interpreter_return() {
                 panic!(
@@ -596,8 +596,9 @@ mod tests {
                     expected
                 );
             }
+            self
         }
-        fn assert_ram_eq(&self, start: usize, end: usize) {
+        fn assert_ram_eq(&self, start: usize, end: usize) -> &TestCaseResult {
             let mut failures: Vec<usize> = vec![];
             for i in start..end {
                 if self.interpreter_ram()[i] != self.compiled_ram()[i] as i32 {
@@ -619,6 +620,7 @@ mod tests {
                     .join("\n");
                 panic!("Interpreted and compiled results don't agree:\n{}", message);
             }
+            self
         }
     }
 
@@ -733,6 +735,34 @@ mod tests {
         result.assert_ram_eq(5, 5 + 8);
         result.assert_return_eq(12);
         assert_eq!(result.compiled_ram()[5], 10);
+    }
+
+    #[test]
+    #[serial]
+    fn test_this_that_pointer_segments() {
+        TestCase::with_code(
+            "
+            function Sys.init 0
+                push constant 1000
+                pop pointer 0
+                push constant 1050
+                pop pointer 1
+                push constant 3
+                pop this 0
+                push constant 5
+                pop this 1
+                push constant 2
+                pop that 0
+                push constant 4
+                pop that 1
+                push constant 0
+            return
+        ",
+        )
+        .ram_size(2000)
+        .run()
+        .assert_ram_eq(1000, 1003)
+        .assert_ram_eq(1050, 1060);
     }
 
     fn test_arithmetic(a: u32, b: u32, op: &str, expected: i32) {

@@ -7,7 +7,7 @@ int main(int argc, char* argv[]) {
   long int* ram = NULL;
 
   long int return_code = hack_sys_init(&ram);
-
+  ram[0] = return_code;
   if (argc >= 2) {
     int i = atoi(argv[1]);
     int j = i + 1;
@@ -19,5 +19,5 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  exit(return_code);
+  exit(EXIT_SUCCESS);
 }

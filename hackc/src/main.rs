@@ -508,10 +508,16 @@ impl Executable {
     }
 
     fn compile(&self) -> Result<PathBuf> {
-        let tokenized_program = get_tokenized_program(&self.input_path)?;
+        let tokenized_program = get_tokenized_program(&self.input_path).with_context(|| {
+            format!(
+                "Failed tokenizing program {}",
+                self.input_path.to_string_lossy()
+            )
+        })?;
 
         let asm_out_path = self.out_dir.join("out.asm");
-        compile_vm_to_asm(&tokenized_program, &asm_out_path)?;
+        compile_vm_to_asm(&tokenized_program, &asm_out_path)
+            .with_context(|| "Failed compiling vmcode to asm")?;
 
         let obj_out_path = assemble(&self.out_dir, &asm_out_path)?;
         let runtime_obj_path = self.runtime.compile(&self.out_dir)?;
@@ -552,40 +558,49 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::hash::Hash;
-
     use super::*;
+    use serial_test::serial;
+    use std::hash::Hash;
 
     struct TestCaseResult<'a> {
         test_case: TestCase<'a>,
-        interpreter_ram: hackvm::VMEmulatorRAM,
-        compiled_ram: Vec<i64>,
-        interpreter_return: i32,
-        compiled_return: std::process::ExitStatus,
+        interpreter_result: Result<(i32, hackvm::VMEmulatorRAM)>,
+        compiled_result: Result<(Option<i32>, Vec<i64>)>,
     }
 
     impl<'a> TestCaseResult<'a> {
+        fn compiled_return(&self) -> i32 {
+            self.compiled_result.as_ref().unwrap().0.unwrap()
+        }
+        fn compiled_ram(&self) -> &[i64] {
+            &self.compiled_result.as_ref().unwrap().1
+        }
+        fn interpreter_return(&self) -> i32 {
+            self.interpreter_result.as_ref().unwrap().0
+        }
+        fn interpreter_ram(&self) -> &hackvm::VMEmulatorRAM {
+            &self.interpreter_result.as_ref().unwrap().1
+        }
         fn assert_return_eq(&self, expected: i32) {
-            if let Some(code) = self.compiled_return.code() {
-                if code != self.interpreter_return {
-                    panic!(
-                        "Interpreted and compiled return codes don't agree: {} != {}",
-                        self.interpreter_return, code
-                    );
-                } else if code != expected {
-                    panic!(
-                        "Interpreted and compiled return codes were unexpected: {} != {}",
-                        self.interpreter_return, expected
-                    );
-                }
-            } else {
-                panic!("Compiled code was terminated by signal")
+            let code = self.compiled_return();
+            if code != self.interpreter_return() {
+                panic!(
+                    "Interpreted and compiled return codes don't agree: {} != {}",
+                    self.interpreter_return(),
+                    code
+                );
+            } else if code != expected {
+                panic!(
+                    "Interpreted and compiled return codes were unexpected: {} != {}",
+                    self.interpreter_return(),
+                    expected
+                );
             }
         }
         fn assert_ram_eq(&self, start: usize, end: usize) {
             let mut failures: Vec<usize> = vec![];
             for i in start..end {
-                if self.interpreter_ram[i] != self.compiled_ram[i] as i32 {
+                if self.interpreter_ram()[i] != self.compiled_ram()[i] as i32 {
                     failures.push(i);
                 }
             }
@@ -595,7 +610,9 @@ mod tests {
                     .map(|i| {
                         format!(
                             "  [{}] {} != {}",
-                            i, self.interpreter_ram[i], self.compiled_ram[i]
+                            i,
+                            self.interpreter_ram()[i],
+                            self.compiled_ram()[i]
                         )
                     })
                     .collect::<Vec<_>>()
@@ -624,16 +641,14 @@ mod tests {
             self
         }
 
-        fn run(self) -> Result<TestCaseResult<'a>> {
-            let (interpreter_return, interpreter_ram) = self.run_interpreter()?;
-            let (compiled_return, compiled_ram) = self.run_compiled()?;
-            Ok(TestCaseResult {
+        fn run(self) -> TestCaseResult<'a> {
+            let interpreter_result = self.run_interpreter();
+            let compiled_result = self.run_compiled();
+            TestCaseResult {
                 test_case: self,
-                interpreter_ram,
-                interpreter_return,
-                compiled_ram,
-                compiled_return,
-            })
+                interpreter_result,
+                compiled_result,
+            }
         }
 
         fn run_interpreter(&self) -> Result<(i32, hackvm::VMEmulatorRAM)> {
@@ -655,7 +670,7 @@ mod tests {
             hash.to_string()
         }
 
-        fn run_compiled(&self) -> Result<(std::process::ExitStatus, Vec<i64>)> {
+        fn run_compiled(&self) -> Result<(Option<i32>, Vec<i64>)> {
             let out_dir = Path::new("/tmp/hackc").join(self.get_hash_string());
             let program_dir = out_dir.join("program");
             fs::create_dir_all(&program_dir).with_context(|| "Failed creating temp directory")?;
@@ -666,15 +681,25 @@ mod tests {
             let executable_path = Executable::new(&program_dir, &out_dir)
                 .runtime(Runtime::debug())
                 .compile()
-                .with_context(|| "Failed compiling executable")?;
-            let output = process::Command::new(executable_path)
-                .arg("1")
+                .with_context(|| {
+                    format!(
+                        "Failed compiling executable for {}",
+                        program_dir.to_string_lossy()
+                    )
+                })?;
+            let output = process::Command::new(&executable_path)
+                .arg("0")
                 .arg(self.ram_size.to_string())
                 .output()
-                .with_context(|| "Failed spawning executable")?;
+                .with_context(|| {
+                    format!(
+                        "Failed spawning executable {}",
+                        executable_path.to_string_lossy()
+                    )
+                })?;
             let stdout = String::from_utf8(output.stdout)
                 .with_context(|| "Failed converting output to utf8")?;
-            let mut ram = vec![-1; self.ram_size];
+            let mut ram: Vec<i64> = vec![-1; self.ram_size];
             stdout.lines().for_each(|line| {
                 let mut parts = line.split(":");
                 if let Some(index) = parts.next() {
@@ -687,11 +712,13 @@ mod tests {
                     }
                 }
             });
-            Ok((output.status, ram))
+            // Ok((output.status.code(), ram))
+            Ok((Some(ram[0] as i32), ram))
         }
     }
 
     #[test]
+    #[serial]
     fn test_temp_segment() {
         let code = "
             function Sys.init 0
@@ -702,25 +729,81 @@ mod tests {
                 push temp 7
             return
         ";
-        let result = TestCase::with_code(code).run().unwrap();
+        let result = TestCase::with_code(code).run();
         result.assert_ram_eq(5, 5 + 8);
         result.assert_return_eq(12);
-        assert_eq!(result.compiled_ram[5], 10);
+        assert_eq!(result.compiled_ram()[5], 10);
+    }
+
+    fn test_arithmetic(a: u32, b: u32, op: &str, expected: i32) {
+        TestCase::with_code(&format!(
+            "
+            function Sys.init 0
+            push constant {}
+            push constant {}
+            {}
+            return
+        ",
+            a, b, op
+        ))
+        .run()
+        .assert_return_eq(expected);
     }
 
     #[test]
+    #[serial]
     fn test_add() {
-        TestCase::with_code(
-            "
-            function Sys.init 0
-            push constant 10
-            push constant 12
-            add
-            return
-        ",
-        )
-        .run()
-        .unwrap()
-        .assert_return_eq(22);
+        test_arithmetic(10, 12, "add", 22);
+    }
+
+    #[test]
+    #[serial]
+    fn test_sub() {
+        test_arithmetic(7, 9, "sub", -2);
+    }
+
+    #[test]
+    #[serial]
+    fn test_neg() {
+        test_arithmetic(7, 8, "neg", -8);
+    }
+
+    #[test]
+    #[serial]
+    fn test_not() {
+        test_arithmetic(7, 5, "not", -6);
+    }
+
+    #[test]
+    #[serial]
+    fn test_and() {
+        test_arithmetic(21, 25, "and", 17);
+    }
+
+    #[test]
+    #[serial]
+    fn test_or() {
+        test_arithmetic(21, 25, "or", 29);
+    }
+
+    #[test]
+    #[serial]
+    fn test_eq() {
+        test_arithmetic(21, 23, "eq", 0);
+        test_arithmetic(21, 21, "eq", -1);
+    }
+
+    #[test]
+    #[serial]
+    fn test_lt() {
+        test_arithmetic(21, 23, "lt", -1);
+        test_arithmetic(23, 21, "lt", 0);
+    }
+
+    #[test]
+    #[serial]
+    fn test_gt() {
+        test_arithmetic(21, 23, "gt", 0);
+        test_arithmetic(23, 21, "gt", -1);
     }
 }

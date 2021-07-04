@@ -10,3 +10,6 @@ edition = "2018"
 hackvm = { path = "../hackvm" }
 clap = "2.33.3"
 anyhow = "1.0"
+
+[dev-dependencies]
+serial_test = "*"

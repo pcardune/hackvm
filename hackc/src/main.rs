@@ -261,7 +261,7 @@ global hack_sys_init
 hack_sys_init:
     mov dword [rdi], 53
     mov dword [rdi], RAM
-    call Sys.init
+    call sys.init
     ret
     \n";
     let indent = |lines: String| -> String {
@@ -288,9 +288,11 @@ hack_sys_init:
                 };
 
                 let asm = match command {
-                    VMToken::Call(func_name, num_args) => compile_call(func_name, num_args),
+                    VMToken::Call(func_name, num_args) => {
+                        compile_call(&func_name.to_lowercase(), num_args)
+                    }
                     VMToken::Function(func_name, num_locals) => {
-                        compile_function(func_name, num_locals)
+                        compile_function(&func_name.to_lowercase(), num_locals)
                     }
                     VMToken::Return => compile_return(),
                     VMToken::Push(segment, index) => compile_push(&context, segment, index),
@@ -447,6 +449,7 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     fn debug() -> Runtime {
         Runtime {
             cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"),
@@ -562,7 +565,7 @@ fn main() {
 
     fs::create_dir_all(out_dir).unwrap();
     let executable_path = Executable::new(Path::new(input_file_path), out_dir)
-        .runtime(Runtime::debug())
+        .runtime(Runtime::default())
         .compile()
         .unwrap();
 

@@ -4,7 +4,7 @@
 #include <SDL2/SDL.h>
 
 extern "C" long int hack_sys_init(long int**);
-void show_window(long int*);
+void show_window(long int*, long int*);
 
 const int SCREEN_WIDTH = 512;
 const int SCREEN_HEIGHT = 256;
@@ -15,7 +15,7 @@ int main() {
   std::thread runner(hack_sys_init, &ram);
   // hack_sys_init(&ram);
   while (ram == NULL) {}
-  show_window(ram + 16384);
+  show_window(ram + 16384, ram + 24576);
 
   printf("output is (at %p):\n", ram);
   for (int i = 0; i < 16; i++) {
@@ -75,7 +75,7 @@ void closeWindow()
   SDL_Quit();
 }
 
-void show_window(long int* ram) {
+void show_window(long int* screenStart, long int* keyboard) {
   //Start up SDL and create window
   if (!init())
   {
@@ -109,6 +109,30 @@ void show_window(long int* ram) {
             //Fill the surface white
             SDL_FillRect(gScreenSurface, NULL, SDL_MapRGB(gScreenSurface->format, 0xAA, 0xFF, 0x33));
           }
+          long int key = 0;
+          switch (e.key.keysym.sym)
+          {
+          case SDLK_LEFT:
+            key = 130;
+            break;
+          case SDLK_UP:
+            key = 131;
+            break;
+          case SDLK_RIGHT:
+            key = 132;
+            break;
+          case SDLK_DOWN:
+            key = 133;
+            break;
+          }
+          if (key != 0) {
+            printf("Setting key to %li\n", key);
+            *keyboard = key;
+          }
+        }
+        else if (e.type == SDL_KEYUP)
+        {
+          *keyboard = 0;
         }
       }
 
@@ -119,7 +143,7 @@ void show_window(long int* ram) {
 
       int p = 0;
       for (int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH / 16; i++) {
-        Uint16 block = ram[i];
+        Uint16 block = screenStart[i];
         for (int j = 0; j < 16; j++) {
           if ((block & 1 << j) > 0) {
             pixels[p++] = black;

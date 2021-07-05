@@ -162,12 +162,27 @@ fn compile_function(func_name: &str, num_locals: &u16) -> String {
 
 fn compile_call(func_name: &str, num_args: &u16) -> String {
     let mut lines = String::new();
+    // push this and that onto the stack
+    lines.push_str("push r14\n");
+    lines.push_str("push r15\n");
+
+    // arguments will already be on the stack
     // push the number of arguments onto the stack
-    lines.push_str(&format!("mov rdx, {}\n", num_args));
+    lines.push_str(&format!("mov rdx, {}\n", num_args + 2));
     lines.push_str("push rdx\n");
 
+    // actually call the function
     lines.push_str(&format!("call {}\n", func_name));
-    for _ in 0..(*num_args + 1) {
+
+    // pop the number of arguments off the stack
+    lines.push_str("pop rbx\n");
+
+    // pop this and that from the stack
+    lines.push_str("pop r15\n");
+    lines.push_str("pop r14\n");
+
+    // pop the arguments off the stack
+    for _ in 0..(*num_args) {
         lines.push_str("pop rbx\n");
     }
     lines.push_str("push rax\n");
@@ -722,7 +737,7 @@ mod tests {
         }
     }
 
-    mod segements {
+    mod segments {
         use super::*;
         #[test]
         #[serial]
@@ -768,6 +783,47 @@ mod tests {
             .run()
             .assert_ram_eq(1000, 1003)
             .assert_ram_eq(1050, 1060);
+        }
+
+        #[test]
+        #[serial]
+        fn test_this_that_pointer_segments_across_function_calls() {
+            TestCase::with_code(
+                "
+                function Sys.init 0
+                    push constant 1000
+                    pop pointer 0
+                    push constant 1050
+                    pop pointer 1
+                    push constant 3
+                    pop this 0
+                    push constant 5
+                    pop that 0
+                    call Sys.next 0
+                    pop temp 0
+                    push this 0
+                    pop temp 1
+                    push that 0
+                    pop temp 2
+                    push constant 0
+                return
+
+                function Sys.next 0
+                    push constant 1100
+                    pop pointer 0
+                    push constant 1150
+                    pop pointer 1
+                    push constant 7
+                    pop this 0
+                    push constant 8
+                    pop that 0
+                    push constant 0
+                return
+                ",
+            )
+            .ram_size(1500)
+            .run()
+            .assert_ram_eq(5, 5 + 8);
         }
 
         #[test]

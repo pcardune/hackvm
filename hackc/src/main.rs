@@ -394,7 +394,8 @@ fn get_program_file_paths(path: &std::path::Path) -> Result<Vec<std::path::PathB
 
 fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
     let paths = get_program_file_paths(path)?;
-    let mut files: Vec<(String, String)> = vec![];
+    let mut files: HashMap<String, String> = HashMap::new();
+
     for path in paths.iter() {
         let file_name = path
             .file_name()
@@ -402,13 +403,30 @@ fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
             .to_string_lossy()
             .to_string();
         let file_content = fs::read_to_string(path).with_context(|| "Failed to read file")?;
-        files.push((file_name, file_content));
+        files.insert(file_name, file_content);
     }
-    let mut stuff: Vec<(&str, &str)> = vec![];
-    for (file_name, file_content) in files.iter() {
-        stuff.push((&file_name, &file_content));
+
+    #[rustfmt::skip]
+    let os_files = vec![
+        ("Array.vm",    std::include_str!("../examples/vmcode/OS/Array.vm")),
+        ("Keyboard.vm", std::include_str!("../examples/vmcode/OS/Keyboard.vm")),
+        ("Math.vm",     std::include_str!("../examples/vmcode/OS/Math.vm")),
+        ("Memory.vm",   std::include_str!("../examples/vmcode/OS/Memory.vm")),
+        ("Output.vm",   std::include_str!("../examples/vmcode/OS/Output.vm")),
+        ("Screen.vm",   std::include_str!("../examples/vmcode/OS/Screen.vm")),
+        ("String.vm",   std::include_str!("../examples/vmcode/OS/String.vm")),
+        ("Sys.vm",      std::include_str!("../examples/vmcode/OS/Sys.vm")),
+    ];
+    for os_file in os_files {
+        if !files.contains_key(os_file.0) {
+            files.insert(os_file.0.to_string(), os_file.1.to_string());
+        }
     }
-    TokenizedProgram::from_files(&stuff).map_err(|e| anyhow::format_err!(e))
+    let file_refs = files
+        .iter()
+        .map(|f| (f.0.as_str(), f.1.as_str()))
+        .collect::<Vec<_>>();
+    TokenizedProgram::from_files(&file_refs).map_err(|e| anyhow::format_err!(e))
 }
 
 fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {

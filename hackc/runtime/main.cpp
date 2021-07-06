@@ -8,6 +8,7 @@ void show_window(long int*, long int*);
 
 const int SCREEN_WIDTH = 512;
 const int SCREEN_HEIGHT = 256;
+const int SCALE = 4;
 
 int main() {
   long int* ram = NULL;
@@ -32,8 +33,11 @@ int main() {
 //The window we'll be rendering to
 SDL_Window* gWindow = NULL;
 
+SDL_Renderer* gRenderer = NULL;
+
 //The surface contained by the window
 SDL_Surface* gScreenSurface = NULL;
+SDL_Surface* gDrawingSurface = NULL;
 
 bool init()
 {
@@ -49,8 +53,13 @@ bool init()
   else
   {
     //Create window
-    gWindow = SDL_CreateWindow("SDL Tutorial", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
-    if (gWindow == NULL)
+    if (SDL_CreateWindowAndRenderer(
+      SCREEN_WIDTH * SCALE,
+      SCREEN_HEIGHT * SCALE,
+      SDL_WINDOW_SHOWN,
+      &gWindow,
+      &gRenderer
+    ) != 0)
     {
       printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
       success = false;
@@ -59,6 +68,19 @@ bool init()
     {
       //Get window surface
       gScreenSurface = SDL_GetWindowSurface(gWindow);
+      SDL_RenderSetLogicalSize(gRenderer, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+      gDrawingSurface = SDL_CreateRGBSurface(
+        0,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        32,
+        0, 0, 0, 0
+      );
+      if (gDrawingSurface == NULL) {
+        printf("Failed creating drawing surface! SDL_Error: %s\n", SDL_GetError());
+        success = false;
+      }
     }
   }
 
@@ -67,6 +89,12 @@ bool init()
 
 void closeWindow()
 {
+  SDL_FreeSurface(gDrawingSurface);
+  gDrawingSurface = NULL;
+
+  SDL_DestroyRenderer(gRenderer);
+  gRenderer = NULL;
+
   //Destroy window
   SDL_DestroyWindow(gWindow);
   gWindow = NULL;
@@ -112,6 +140,9 @@ void show_window(long int* screenStart, long int* keyboard) {
           long int key = 0;
           switch (e.key.keysym.sym)
           {
+          case SDLK_SPACE:
+            key = 32;
+            break;
           case SDLK_LEFT:
             key = 130;
             break;
@@ -136,10 +167,10 @@ void show_window(long int* screenStart, long int* keyboard) {
         }
       }
 
-      SDL_LockSurface(gScreenSurface);
-      Uint32* pixels = (Uint32*)gScreenSurface->pixels;
-      Uint32 black = SDL_MapRGB(gScreenSurface->format, 0xFF, 0x11, 0x22);
-      Uint32 white = SDL_MapRGB(gScreenSurface->format, 0x55, 0xFF, 0xFF);
+      SDL_LockSurface(gDrawingSurface);
+      Uint32* pixels = (Uint32*)gDrawingSurface->pixels;
+      Uint32 black = SDL_MapRGB(gDrawingSurface->format, 0x00, 0x00, 0x00);
+      Uint32 white = SDL_MapRGB(gDrawingSurface->format, 0xFF, 0xFF, 0xFF);
 
       int p = 0;
       for (int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH / 16; i++) {
@@ -153,8 +184,21 @@ void show_window(long int* screenStart, long int* keyboard) {
           }
         }
       }
-      SDL_UnlockSurface(gScreenSurface);
+      SDL_UnlockSurface(gDrawingSurface);
       // printf("pixel is: %xd. bits per pixel: %d\n", index, gScreenSurface->format->BitsPerPixel);
+
+      SDL_Rect srcRect;
+      srcRect.x = 0;
+      srcRect.y = 0;
+      srcRect.w = SCREEN_WIDTH;
+      srcRect.h = SCREEN_HEIGHT;
+      SDL_Rect dstRect = srcRect;
+      dstRect.w *= SCALE;
+      dstRect.h *= SCALE;
+
+      if (SDL_BlitScaled(gDrawingSurface, &srcRect, gScreenSurface, &dstRect) != 0) {
+        printf("Failed blitting surface! SDL_Error: %s\n", SDL_GetError());
+      };
 
       //Update the surface
       SDL_UpdateWindowSurface(gWindow);

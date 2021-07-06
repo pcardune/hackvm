@@ -392,7 +392,7 @@ fn get_program_file_paths(path: &std::path::Path) -> Result<Vec<std::path::PathB
     return Ok(paths);
 }
 
-fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
+fn get_tokenized_program(path: &std::path::Path, include_os: bool) -> Result<TokenizedProgram> {
     let paths = get_program_file_paths(path)?;
     let mut files: HashMap<String, String> = HashMap::new();
 
@@ -417,9 +417,11 @@ fn get_tokenized_program(path: &std::path::Path) -> Result<TokenizedProgram> {
         ("String.vm",   std::include_str!("../examples/vmcode/OS/String.vm")),
         ("Sys.vm",      std::include_str!("../examples/vmcode/OS/Sys.vm")),
     ];
-    for os_file in os_files {
-        if !files.contains_key(os_file.0) {
-            files.insert(os_file.0.to_string(), os_file.1.to_string());
+    if include_os {
+        for os_file in os_files {
+            if !files.contains_key(os_file.0) {
+                files.insert(os_file.0.to_string(), os_file.1.to_string());
+            }
         }
     }
     let file_refs = files
@@ -527,6 +529,7 @@ struct Executable {
     input_path: PathBuf,
     out_dir: PathBuf,
     runtime: Runtime,
+    include_os: bool,
 }
 
 impl Executable {
@@ -535,6 +538,7 @@ impl Executable {
             input_path: input_path.to_path_buf(),
             out_dir: out_dir.to_path_buf(),
             runtime: Runtime::default(),
+            include_os: false,
         }
     }
 
@@ -543,13 +547,19 @@ impl Executable {
         self
     }
 
+    fn include_os(mut self, include_os: bool) -> Executable {
+        self.include_os = include_os;
+        self
+    }
+
     fn compile(&self) -> Result<PathBuf> {
-        let tokenized_program = get_tokenized_program(&self.input_path).with_context(|| {
-            format!(
-                "Failed tokenizing program {}",
-                self.input_path.to_string_lossy()
-            )
-        })?;
+        let tokenized_program = get_tokenized_program(&self.input_path, self.include_os)
+            .with_context(|| {
+                format!(
+                    "Failed tokenizing program {}",
+                    self.input_path.to_string_lossy()
+                )
+            })?;
 
         let asm_out_path = self.out_dir.join("out.asm");
         compile_vm_to_asm(&tokenized_program, &asm_out_path)
@@ -584,6 +594,7 @@ fn main() {
     fs::create_dir_all(out_dir).unwrap();
     let executable_path = Executable::new(Path::new(input_file_path), out_dir)
         .runtime(Runtime::default())
+        .include_os(true)
         .compile()
         .unwrap();
 

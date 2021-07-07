@@ -1,2 +1,2 @@
 [workspace]
-members = ["hackvm", "hackc"]
+members = ["hackvm", "hackc", "fun"]

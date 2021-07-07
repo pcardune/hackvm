@@ -43,7 +43,7 @@ expr = {
   term ~ (binary_operator ~ term)*
 }
 // TYPES
-type_ref = {
+type_ref = ${
   identifier ~ "[]"?
 }
 typed_identifier = {
@@ -78,8 +78,12 @@ class_field = { typed_identifier ~ ";"}
 class_method = {
   identifier ~ parameter_decl ~ ":" ~ type_ref ~ block
 }
+static_method = {
+  "static" ~ class_method
+}
 class_decl = {
   "class" ~ identifier ~ "{" ~
+  static_method* ~
   class_field* ~
   constructor_decl? ~
   class_method* ~
@@ -87,6 +91,6 @@ class_decl = {
 }
 file = {
   SOI ~
-  class_decl+ ~
+  class_decl* ~
   EOI
 }

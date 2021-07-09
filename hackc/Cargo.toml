@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 hackvm = { path = "../hackvm" }
+fun = { path = "../fun" }
 clap = "2.33.3"
 anyhow = "1.0"
 

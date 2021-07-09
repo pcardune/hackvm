@@ -31,9 +31,9 @@ pub enum Token {
     Call(String, u16),
 }
 
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
+impl Token {
+    fn to_string(&self) -> String {
+        match self {
             Token::None => "<none>".to_string(),
             // arithmetic commands
             Token::Neg
@@ -61,8 +61,13 @@ impl fmt::Display for Token {
             }
             Token::Return => "return".to_string(),
             Token::Call(func_name, num_args) => format!("call {} {}", func_name, num_args),
-        };
-        f.write_str(&s)
+        }
+    }
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_string())
     }
 }
 

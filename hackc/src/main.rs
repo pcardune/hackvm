@@ -2,7 +2,8 @@ use anyhow::{anyhow, Context, Result};
 use clap::{App, Arg};
 use hackvm::TokenizedProgram;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{fs, process};
@@ -33,25 +34,80 @@ fn run<'a>(prefix: &str, command: &'a mut Command) -> bool {
     exit_status.success()
 }
 
-/// Traverses a directory to get a vector of paths to .vm files
-fn get_program_file_paths(path: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
-    let mut paths: Vec<std::path::PathBuf> = vec![];
-    if path.is_file() {
-        paths.push(path.to_path_buf());
-    } else {
-        for entry in std::fs::read_dir(path).with_context(|| "Failed reading directory")? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(extension) = path.extension() {
-                    if extension == "vm" {
-                        paths.push(path);
-                    }
+#[derive(PartialEq)]
+enum FileType {
+    VM,
+    FUN,
+}
+
+impl FileType {
+    pub fn from_path(path: &std::path::Path) -> Option<FileType> {
+        path.extension()
+            .map(|extension| {
+                if extension == "vm" {
+                    Some(FileType::VM)
+                } else if extension == "fun" {
+                    Some(FileType::FUN)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
+}
+
+struct CompilerInput {
+    path: std::path::PathBuf,
+}
+
+impl CompilerInput {
+    pub fn new(path: std::path::PathBuf) -> CompilerInput {
+        CompilerInput { path }
+    }
+    fn paths(&self) -> Result<Vec<std::path::PathBuf>> {
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        if self.path.is_file() {
+            paths.push(self.path.clone());
+        } else {
+            let entries =
+                std::fs::read_dir(&self.path).with_context(|| "Failed reading directory")?;
+            for entry in entries {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() {
+                    paths.push(path);
                 }
             }
+            // let entries =
+            //     std::fs::read_dir(&self.path).with_context(|| "Failed reading directory")?;
+            // let entries = entries.filter_map(|entry| {
+            //     entry
+            //         .map(|e| {
+            //             let path = e.path();
+            //             if path.is_file() {
+            //                 Some(path)
+            //             } else {
+            //                 None
+            //             }
+            //         })
+            //         .transpose()
+            // });
+            // Ok(entries)
         }
+        Ok(paths)
     }
-    return Ok(paths);
+
+    pub fn get_files(&self, file_type: FileType) -> Result<Vec<std::path::PathBuf>> {
+        let filtered = self
+            .paths()?
+            .into_iter()
+            .filter(|p| match FileType::from_path(p) {
+                Some(ft) => ft == file_type,
+                None => false,
+            })
+            .collect::<Vec<_>>();
+        Ok(filtered)
+    }
 }
 
 fn get_tokenized_program(
@@ -133,7 +189,6 @@ impl Runtime {
         }
     }
 
-    #[cfg(test)]
     fn debug() -> Runtime {
         Runtime {
             cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"),
@@ -190,7 +245,7 @@ fn link_executable(
 }
 
 struct Executable {
-    input_path: PathBuf,
+    compiler_input: CompilerInput,
     out_dir: PathBuf,
     runtime: Runtime,
     include_os: bool,
@@ -199,7 +254,7 @@ struct Executable {
 impl Executable {
     fn new(input_path: &Path, out_dir: &Path) -> Executable {
         Executable {
-            input_path: input_path.to_path_buf(),
+            compiler_input: CompilerInput::new(input_path.to_path_buf()),
             out_dir: out_dir.to_path_buf(),
             runtime: Runtime::default(),
             include_os: false,
@@ -217,13 +272,31 @@ impl Executable {
     }
 
     fn compile(&self) -> Result<PathBuf> {
-        let paths = get_program_file_paths(&self.input_path)?;
+        let fun_files = self.compiler_input.get_files(FileType::FUN)?;
+
+        for path in fun_files.iter() {
+            let content = fs::read_to_string(path).with_context(|| "Failed to read file")?;
+            let vmcode = fun::compile(&content).with_context(|| {
+                format!("failed compiling {} to vmcode", path.to_string_lossy())
+            })?;
+            let mut output_path = path.clone();
+            output_path.set_extension("vm");
+            let mut file = File::create(&output_path)?;
+            for token in vmcode.iter() {
+                let mut line = token.to_string();
+                line.push('\n');
+                file.write(line.as_bytes())
+                    .with_context(|| format!("Failed writing to {:?}", file))?;
+            }
+        }
+
+        let vm_files = self.compiler_input.get_files(FileType::VM)?;
 
         let tokenized_program =
-            get_tokenized_program(&paths, self.include_os).with_context(|| {
+            get_tokenized_program(&vm_files, self.include_os).with_context(|| {
                 format!(
                     "Failed tokenizing program {}",
-                    self.input_path.to_string_lossy()
+                    self.compiler_input.path.to_string_lossy()
                 )
             })?;
 
@@ -252,15 +325,32 @@ fn main() {
                 .short("i")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("runtime")
+                .long("runtime")
+                .takes_value(true)
+                .default_value("default"),
+        )
+        .arg(Arg::with_name("no-os").long("no-os"))
         .arg(Arg::with_name("exec").long("exec"))
         .get_matches();
     let input_file_path = matches.value_of("input").unwrap();
     let out_dir = Path::new("out");
 
+    let runtime: Runtime = match matches.value_of("runtime") {
+        Some("default") => Runtime::default(),
+        Some("debug") => Runtime::debug(),
+        Some(other) => {
+            println!("Invalid runtime \"{}\"", other);
+            return;
+        }
+        None => unreachable!(),
+    };
+
     fs::create_dir_all(out_dir).unwrap();
     let executable_path = Executable::new(Path::new(input_file_path), out_dir)
-        .runtime(Runtime::default())
-        .include_os(true)
+        .runtime(runtime)
+        .include_os(!matches.is_present("no-os"))
         .compile()
         .unwrap();
 

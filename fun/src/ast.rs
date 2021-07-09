@@ -1,7 +1,15 @@
 use getset::Getters;
 
+#[derive(Getters)]
 pub struct Module {
-    pub classes: Vec<ClassDecl>,
+    #[getset(get = "pub")]
+    classes: Vec<ClassDecl>,
+}
+
+impl Module {
+    pub fn new(classes: Vec<ClassDecl>) -> Module {
+        Module { classes }
+    }
 }
 
 #[derive(Getters)]
@@ -108,15 +116,16 @@ impl Block {
     }
 }
 
+#[derive(Debug)]
 pub enum Statement {
     Let(LetStatement),
     While,
-    Return,
+    Return(Expression),
     Assignment,
     Expr,
 }
 
-#[derive(Getters)]
+#[derive(Getters, Debug)]
 pub struct LetStatement {
     #[getset(get = "pub")]
     name: String,
@@ -138,17 +147,23 @@ impl LetStatement {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Op {
+    Plus,
+}
+
 #[derive(Debug)]
 pub enum Term {
-    Number(i64),
+    Number(u64),
     Bool(bool),
     String(String),
     Array(Vec<Expression>),
-    BinaryOp(Box<Term>, Box<Term>),
+    Reference(String),
+    BinaryOp(Op, Box<Term>, Box<Term>),
 }
 
 impl Term {
-    pub fn as_number(&self) -> Option<i64> {
+    pub fn as_number(&self) -> Option<u64> {
         if let Term::Number(val) = self {
             Some(*val)
         } else {
@@ -176,7 +191,13 @@ impl Term {
             None
         }
     }
-    // pub fn as_array() -> Vec<Expression>
+    pub fn as_binary_op(&self) -> Option<(&Op, &Box<Term>, &Box<Term>)> {
+        if let Term::BinaryOp(op, t1, t2) = self {
+            Some((op, t1, t2))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Getters, Debug)]

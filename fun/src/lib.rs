@@ -7,18 +7,20 @@ mod ast;
 mod compiler;
 mod parser;
 
-use ast::{Block, ClassDecl, Expression, Module, Parameter, Scope, Term};
-use compiler::compile_module;
+use ast::{
+    AssignmentStatement, Block, ClassDecl, Expression, Module, Node, Parameter, Scope, Term,
+};
+use compiler::Compiler;
 use hackvm::VMToken;
 use parser::{FUNParser, Rule};
 use pest::iterators::Pair;
 use pest::Parser;
 
-use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement};
+use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatement};
 
 pub fn compile(input: &str) -> Result<Vec<VMToken>> {
     let module = parse_module(input)?;
-    compile_module(module)
+    Compiler::new().compile_module(module)
 }
 
 pub fn parse_module(input: &str) -> Result<Module> {
@@ -29,7 +31,7 @@ pub fn parse_module(input: &str) -> Result<Module> {
             Rule::file => {
                 for pair in pair.into_inner() {
                     match pair.as_rule() {
-                        Rule::class_decl => classes.push(parse_class_decl(pair)?),
+                        Rule::class_decl => classes.push(Node::from_pair(pair)?),
                         Rule::EOI => {
                             break;
                         }
@@ -43,39 +45,55 @@ pub fn parse_module(input: &str) -> Result<Module> {
     return Ok(Module::new(classes));
 }
 
-fn parse_class_decl(pair: pest::iterators::Pair<Rule>) -> Result<ClassDecl> {
-    let mut pairs = pair.into_inner();
-    let name = pairs
-        .next()
-        .expect("No class name found")
-        .as_str()
-        .to_string();
-    let mut fields: Vec<FieldDecl> = vec![];
-    let mut methods: Vec<MethodDecl> = vec![];
-    for pair in pairs {
-        match pair.as_rule() {
-            Rule::static_method => {
-                methods.push(parse_method_decl(
-                    pair.into_inner().next().unwrap(),
-                    Scope::Static,
-                )?);
-            }
-            Rule::class_field => {
-                fields.push(parse_field_decl(pair)?);
-            }
-            Rule::class_method => {
-                methods.push(parse_method_decl(pair, Scope::Instance)?);
-            }
-            _ => panic!("Not sure what to do with {:?}", pair),
-        }
+impl<'a> Node<'a, ClassDecl<'a>> {
+    pub fn name(&self) -> &str {
+        self.data().name()
     }
-    Ok(ClassDecl::new(name, fields, methods))
+
+    pub fn fields(&self) -> &Vec<Node<FieldDecl>> {
+        self.data().fields()
+    }
+
+    pub fn methods(&self) -> &Vec<MethodDecl> {
+        self.data().methods()
+    }
+
+    fn from_pair(pair: Pair<'a, Rule>) -> Result<Node<'a, ClassDecl>> {
+        let span = pair.as_span();
+        let mut pairs = pair.into_inner();
+        let name = pairs
+            .next()
+            .expect("No class name found")
+            .as_str()
+            .to_string();
+        let mut fields = vec![];
+        let mut methods: Vec<MethodDecl> = vec![];
+        for pair in pairs {
+            match pair.as_rule() {
+                Rule::static_method => {
+                    methods.push(parse_method_decl(
+                        pair.into_inner().next().unwrap(),
+                        Scope::Static,
+                    )?);
+                }
+                Rule::class_field => {
+                    fields.push(parse_field_decl(pair)?);
+                }
+                Rule::class_method => {
+                    methods.push(parse_method_decl(pair, Scope::Instance)?);
+                }
+                _ => panic!("Not sure what to do with {:?}", pair),
+            }
+        }
+        Ok(Node::new(span, ClassDecl::new(name, fields, methods)))
+    }
 }
 
-fn parse_field_decl(pair: Pair<Rule>) -> Result<FieldDecl> {
+fn parse_field_decl<'a>(pair: Pair<'a, Rule>) -> Result<Node<'a, FieldDecl>> {
+    let span = pair.as_span();
     let typed_identifier = pair.into_inner().next().expect("no typed identifier...");
     let (name, type_name) = parse_typed_identifier(typed_identifier)?;
-    Ok(FieldDecl::new(name, type_name))
+    Ok(Node::new(span, FieldDecl::new(name, type_name)))
 }
 
 fn parse_typed_identifier(pair: Pair<Rule>) -> Result<(String, String)> {
@@ -131,7 +149,7 @@ fn parse_block(pair: Pair<Rule>) -> Result<Block> {
         for pair in pair.into_inner() {
             let statement: Statement = match pair.as_rule() {
                 Rule::let_statement => Statement::Let(parse_let_statement(pair)?),
-                Rule::while_statement => Statement::While,
+                Rule::while_statement => Statement::While(parse_while_statement(pair)?),
                 Rule::return_statement => {
                     let expr = if let Some(pair) = pair.into_inner().next() {
                         parse_expr(pair)?
@@ -140,7 +158,9 @@ fn parse_block(pair: Pair<Rule>) -> Result<Block> {
                     };
                     Statement::Return(expr)
                 }
-                Rule::assignment_statement => Statement::Assignment,
+                Rule::assignment_statement => {
+                    Statement::Assignment(parse_assignment_statement(pair)?)
+                }
                 Rule::expr_statement => Statement::Expr,
                 _ => panic!("Not sure what to do with {}", pair),
             };
@@ -158,6 +178,25 @@ fn parse_let_statement(pair: Pair<Rule>) -> Result<LetStatement> {
     Ok(LetStatement::new(name, type_name, value_expr))
 }
 
+fn parse_assignment_statement(pair: Pair<Rule>) -> Result<AssignmentStatement> {
+    let mut pairs = pair.into_inner();
+    let name = pairs
+        .next()
+        .expect("no reference found in assignement")
+        .as_str()
+        .to_string();
+
+    let value_expr = parse_expr(pairs.next().expect("no expression found"))?;
+    Ok(AssignmentStatement::new(name, value_expr))
+}
+
+fn parse_while_statement(pair: Pair<Rule>) -> Result<WhileStatement> {
+    let mut pairs = pair.into_inner();
+    let condition_expr = parse_expr(pairs.next().expect("no condition expression found"))?;
+    let block = parse_block(pairs.next().expect("no block found in while statement"))?;
+    Ok(WhileStatement::new(condition_expr, block))
+}
+
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     let mut pairs = pair.into_inner();
     let mut term = parse_term(pairs.next().expect("Expression unexpectedly has no terms"))?;
@@ -166,6 +205,9 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
             Rule::binary_operator => {
                 let op = match pair.as_str() {
                     "+" => Op::Plus,
+                    "-" => Op::Sub,
+                    "<" => Op::Lt,
+                    ">" => Op::Gt,
                     other => panic!("Unrecognized operator {}", other),
                 };
                 let term_pair = pairs.next().expect("Operator without second term");
@@ -230,8 +272,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(module.classes().len(), 2);
-        assert_eq!(module.classes()[0].name(), "Foo");
-        assert_eq!(module.classes()[1].name(), "Bar");
+        assert_eq!(module.classes()[0].data().name(), "Foo");
+        assert_eq!(module.classes()[1].data().name(), "Bar");
     }
 
     #[test]
@@ -247,8 +289,8 @@ mod tests {
         .unwrap();
         let fields = module.classes()[0].fields();
         assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].name(), "x");
-        assert_eq!(fields[0].type_name(), "number");
+        assert_eq!(fields[0].data().name(), "x");
+        assert_eq!(fields[0].data().type_name(), "number");
     }
 
     #[test]
@@ -314,6 +356,19 @@ mod tests {
         .unwrap();
         let block = parse_block(pair).unwrap();
         assert_eq!(block.statements().len(), 6);
+    }
+
+    #[test]
+    fn test_let_statement() {
+        let pair = FUNParser::parse(Rule::let_statement, "let foo: number = 0;")
+            .expect("failed to parse")
+            .next()
+            .unwrap();
+        let let_statement = parse_let_statement(pair).unwrap();
+        assert_eq!(let_statement.name(), "foo");
+        assert_eq!(let_statement.type_name(), "number");
+        let term = let_statement.value_expr().term();
+        assert_eq!(term.as_number(), Some(0));
     }
 
     mod expr {

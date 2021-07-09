@@ -1,31 +1,53 @@
 use getset::Getters;
+use pest::Span;
 
 #[derive(Getters)]
-pub struct Module {
+pub struct Module<'a> {
     #[getset(get = "pub")]
-    classes: Vec<ClassDecl>,
+    classes: Vec<Node<'a, ClassDecl<'a>>>,
 }
 
-impl Module {
-    pub fn new(classes: Vec<ClassDecl>) -> Module {
+impl<'a> Module<'a> {
+    pub fn new(classes: Vec<Node<'a, ClassDecl<'a>>>) -> Module<'a> {
         Module { classes }
     }
 }
 
 #[derive(Getters)]
-pub struct ClassDecl {
+pub struct Node<'a, T: ?Sized> {
+    #[getset(get = "pub")]
+    span: Span<'a>,
+    #[getset(get = "pub")]
+    data: Box<T>,
+}
+
+impl<'a, T> Node<'a, T> {
+    pub fn new(span: Span<'a>, data: T) -> Node<'a, T> {
+        Node {
+            span,
+            data: Box::from(data),
+        }
+    }
+}
+
+#[derive(Getters)]
+pub struct ClassDecl<'a> {
     #[getset(get = "pub")]
     name: String,
 
     #[getset(get = "pub")]
-    fields: Vec<FieldDecl>,
+    fields: Vec<Node<'a, FieldDecl>>,
 
     #[getset(get = "pub")]
     methods: Vec<MethodDecl>,
 }
 
-impl ClassDecl {
-    pub fn new(name: String, fields: Vec<FieldDecl>, methods: Vec<MethodDecl>) -> ClassDecl {
+impl<'a> ClassDecl<'a> {
+    pub fn new(
+        name: String,
+        fields: Vec<Node<'a, FieldDecl>>,
+        methods: Vec<MethodDecl>,
+    ) -> ClassDecl<'a> {
         ClassDecl {
             name,
             fields,
@@ -105,7 +127,7 @@ impl Parameter {
     }
 }
 
-#[derive(Getters)]
+#[derive(Getters, Debug)]
 pub struct Block {
     #[getset(get = "pub")]
     statements: Vec<Statement>,
@@ -119,15 +141,14 @@ impl Block {
 #[derive(Debug)]
 pub enum Statement {
     Let(LetStatement),
-    While,
+    While(WhileStatement),
     Return(Expression),
-    Assignment,
+    Assignment(AssignmentStatement),
     Expr,
 }
 
 #[derive(Getters, Debug)]
 pub struct LetStatement {
-    #[getset(get = "pub")]
     name: String,
 
     #[getset(get = "pub")]
@@ -145,11 +166,49 @@ impl LetStatement {
             value_expr,
         }
     }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+#[derive(Getters, Debug)]
+pub struct AssignmentStatement {
+    #[getset(get = "pub")]
+    name: String,
+
+    #[getset(get = "pub")]
+    value_expr: Expression,
+}
+
+impl AssignmentStatement {
+    pub fn new(name: String, value_expr: Expression) -> AssignmentStatement {
+        AssignmentStatement { name, value_expr }
+    }
+}
+
+#[derive(Getters, Debug)]
+pub struct WhileStatement {
+    #[getset(get = "pub")]
+    condition_expr: Expression,
+    #[getset(get = "pub")]
+    block: Block,
+}
+
+impl WhileStatement {
+    pub fn new(condition_expr: Expression, block: Block) -> WhileStatement {
+        WhileStatement {
+            condition_expr,
+            block,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Op {
     Plus,
+    Sub,
+    Lt,
+    Gt,
 }
 
 #[derive(Debug)]

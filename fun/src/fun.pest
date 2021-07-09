@@ -24,7 +24,7 @@ binary_operator = {
   | "=="
 }
 
-reference = {
+reference = @{
   identifier ~ ("." ~ identifier)*
 }
 call_expr = { reference ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")"}

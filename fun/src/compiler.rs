@@ -1,7 +1,8 @@
 use core::panic;
 use std::collections::HashMap;
+use std::usize;
 
-use crate::ast::{AssignmentStatement, Block, Scope, WhileStatement};
+use crate::ast::{AssignmentStatement, Block, MethodDecl, Scope, WhileStatement};
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -49,15 +50,40 @@ impl StaticsTable {
     }
 }
 
+#[derive(Default)]
+struct Namespace {
+    names: HashMap<String, (VMSegment, usize)>,
+}
+impl Namespace {
+    fn segment_size(&self, segment: &VMSegment) -> usize {
+        self.names.values().filter(|v| &v.0 == segment).count()
+    }
+    fn register(&mut self, name: &str, segment: &VMSegment) -> Option<usize> {
+        if self.names.contains_key(name) {
+            None
+        } else {
+            let index = self.segment_size(segment);
+            self.names.insert(name.to_owned(), (*segment, index));
+            Some(index)
+        }
+    }
+    fn get(&self, name: &str) -> Option<&(VMSegment, usize)> {
+        self.names.get(name)
+    }
+    fn clear(&mut self) {
+        self.names.clear();
+    }
+}
+
 pub struct Compiler {
-    local_names: HashMap<String, usize>,
+    local_names: Namespace,
     statics_table: StaticsTable,
 }
 
 impl Compiler {
     pub fn new() -> Compiler {
         Compiler {
-            local_names: HashMap::new(),
+            local_names: Namespace::default(),
             statics_table: StaticsTable::new(),
         }
     }
@@ -79,35 +105,46 @@ impl Compiler {
                 }
             }
             for method in class_decl.methods() {
-                self.local_names.clear();
-
-                let block_tokens = self.compile_block(method.block())?;
-
-                let num_locals = self.local_names.len();
-                let token = VMToken::Function(
-                    format!("{}.{}", class_decl.name(), method.name()),
-                    num_locals as u16,
-                );
-                commands.push(token);
-                commands.append(&mut block_tokens.into());
+                commands.append(&mut self.compile_method(class_decl.name(), method)?);
             }
         }
         return Ok(commands);
     }
 
+    fn compile_method(&mut self, class_name: &str, method: &MethodDecl) -> Result<Vec<VMToken>> {
+        let mut commands: Vec<VMToken> = Vec::new();
+        self.local_names.clear();
+
+        for parameter in method.parameters() {
+            self.local_names
+                .register(parameter.name(), &VMSegment::Argument);
+        }
+
+        let block_tokens = self.compile_block(method.block())?;
+
+        let num_locals = self.local_names.segment_size(&VMSegment::Local);
+        let token = VMToken::Function(
+            format!("{}.{}", class_name, method.name()),
+            num_locals as u16,
+        );
+        commands.push(token);
+        commands.append(&mut block_tokens.into());
+        Ok(commands)
+    }
+
     fn compile_let_statement(&mut self, let_statement: &LetStatement) -> Result<Vec<VMToken>> {
         let name = let_statement.name();
-        if self.local_names.contains_key(name) {
+        let index = self.local_names.register(name, &VMSegment::Local);
+        if let Some(index) = index {
+            let mut tokens = self.compile_expression(let_statement.value_expr())?;
+            tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
+            return Ok(tokens);
+        } else {
             return Err(anyhow!(
                 "a variable with the name \"{}\" has already been declared",
                 name
             ));
         }
-        let index = self.local_names.len();
-        self.local_names.insert(name.to_string(), index);
-        let mut tokens = self.compile_expression(let_statement.value_expr())?;
-        tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
-        return Ok(tokens);
     }
 
     fn compile_assignment_statement(
@@ -129,8 +166,8 @@ impl Compiler {
                 todo!()
             }
             Term::Identifier(name) => {
-                if let Some(&index) = self.local_names.get(name) {
-                    tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
+                if let Some(&(segment, index)) = self.local_names.get(name) {
+                    tokens.push(VMToken::Pop(segment, index as u16));
                     Ok(tokens)
                 } else {
                     Err(anyhow!("variable \"{}\" has never been declared", name))
@@ -184,8 +221,8 @@ impl Compiler {
     }
 
     fn compile_reference(&mut self, reference: &String) -> Result<Vec<VMToken>> {
-        if let Some(index) = self.local_names.get(reference) {
-            return Ok(vec![VMToken::Push(VMSegment::Local, *index as u16)]);
+        if let Some(&(segment, index)) = self.local_names.get(reference) {
+            return Ok(vec![VMToken::Push(segment, index as u16)]);
         }
         Err(anyhow!(
             "variable \"{}\" has not been declared with a let statement",
@@ -292,6 +329,31 @@ mod tests {
                 VMToken::Return
             ]
         )
+    }
+
+    #[test]
+    fn test_function_parameters() {
+        let module = parse_module(
+            "
+            class Math {
+                static add(a: number, b: number): number {
+                    return a + b;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Math.add".to_string(), 0),
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Push(VMSegment::Argument, 1),
+                VMToken::Add,
+                VMToken::Return
+            ]
+        );
     }
 
     #[test]

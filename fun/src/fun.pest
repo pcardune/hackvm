@@ -11,18 +11,30 @@ unary_operator = {
   "!"
   | "~"
 }
-binary_operator = {
-  "."
-  | "+"
-  | "-"
-  | "*"
-  | "/"
-  | "<="
-  | "<"
-  | ">="
-  | ">"
-  | "!="
-  | "=="
+dot = { "." }
+plus = { "+" }
+sub = { "-" }
+multiply = { "*" }
+divide = { "/" }
+cmp_lte = { "<=" }
+cmp_lt = { "<" }
+cmp_gte = { ">=" }
+cmp_gt = { ">" }
+cmp_ne = { "!=" }
+cmp_eq = { "==" }
+
+binary_operator = _{
+  dot
+  | plus
+  | sub
+  | multiply
+  | divide
+  | cmp_lte
+  | cmp_lt
+  | cmp_gte
+  | cmp_gt
+  | cmp_ne
+  | cmp_eq
 }
 
 // reference = {

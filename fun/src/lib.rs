@@ -13,8 +13,11 @@ use ast::{
 use compiler::Compiler;
 use hackvm::VMToken;
 use parser::{FUNParser, Rule};
-use pest::iterators::Pair;
 use pest::Parser;
+use pest::{
+    iterators::Pair,
+    prec_climber::{Assoc, Operator, PrecClimber},
+};
 
 use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatement};
 
@@ -202,27 +205,27 @@ fn parse_while_statement(pair: Pair<Rule>) -> Result<WhileStatement> {
 }
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
-    let mut pairs = pair.into_inner();
-    let mut term = parse_term(pairs.next().expect("Expression unexpectedly has no terms"))?;
-    while let Some(pair) = pairs.next() {
-        match pair.as_rule() {
-            Rule::binary_operator => {
-                let op = match pair.as_str() {
-                    "+" => Op::Plus,
-                    "-" => Op::Sub,
-                    "<" => Op::Lt,
-                    ">" => Op::Gt,
-                    "." => Op::Dot,
-                    other => panic!("Unrecognized operator {}", other),
-                };
-                let term_pair = pairs.next().expect("Operator without second term");
-                let other_term = parse_term(term_pair)?;
-                term = Term::BinaryOp(op, Box::from(term), Box::from(other_term));
-            }
-            _ => unreachable!(),
-        }
-    }
-    Ok(Expression::new(term))
+    let climber: PrecClimber<Rule> = PrecClimber::new(vec![
+        Operator::new(Rule::cmp_lt, Assoc::Left) | Operator::new(Rule::cmp_gt, Assoc::Left),
+        Operator::new(Rule::plus, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
+        Operator::new(Rule::dot, Assoc::Left),
+    ]);
+
+    let primary = |pair: Pair<Rule>| parse_term(pair).unwrap();
+    let infix = |left: Term, op: Pair<Rule>, right: Term| {
+        let op = match op.as_rule() {
+            Rule::plus => Op::Plus,
+            Rule::sub => Op::Sub,
+            Rule::cmp_lt => Op::Lt,
+            Rule::cmp_gt => Op::Gt,
+            Rule::dot => Op::Dot,
+            other => panic!("Unrecognized operator {:?}", other),
+        };
+        Term::binary_op(op, left, right)
+    };
+    let pairs = pair.into_inner();
+    let result = climber.climb(pairs, primary, infix);
+    Ok(Expression::new(result))
 }
 
 fn parse_term(pair: Pair<Rule>) -> Result<Term> {
@@ -435,10 +438,10 @@ mod tests {
         #[test]
         fn test_multipart_expr() {
             let expr = parse_expr_from_str("3+4");
-            let (op, a, b) = expr.term().as_binary_op().unwrap();
-            assert_eq!(op, &Op::Plus);
-            assert_eq!(a.as_number(), Some(3));
-            assert_eq!(b.as_number(), Some(4));
+            assert_eq!(
+                expr.term(),
+                &Term::binary_op(Op::Plus, Term::Number(3), Term::Number(4))
+            );
         }
 
         #[test]
@@ -465,6 +468,27 @@ mod tests {
                     Term::identifier("baz")
                 )
             );
+        }
+
+        #[test]
+        fn test_operator_precendence() {
+            let expr = parse_expr_from_str("foo.bar + other.baz.zap");
+            assert_eq!(
+                expr.term(),
+                &Term::binary_op(
+                    Op::Plus,
+                    Term::binary_op(Op::Dot, Term::identifier("foo"), Term::identifier("bar")),
+                    Term::binary_op(
+                        Op::Dot,
+                        Term::binary_op(
+                            Op::Dot,
+                            Term::identifier("other"),
+                            Term::identifier("baz")
+                        ),
+                        Term::identifier("zap")
+                    )
+                )
+            )
         }
     }
 }

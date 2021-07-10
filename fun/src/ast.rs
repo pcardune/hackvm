@@ -40,6 +40,9 @@ pub struct ClassDecl<'a> {
 
     #[getset(get = "pub")]
     methods: Vec<MethodDecl>,
+
+    #[getset(get = "pub")]
+    constructor: Option<MethodDecl>,
 }
 
 impl<'a> ClassDecl<'a> {
@@ -47,11 +50,13 @@ impl<'a> ClassDecl<'a> {
         name: String,
         fields: Vec<Node<'a, FieldDecl>>,
         methods: Vec<MethodDecl>,
+        constructor: Option<MethodDecl>,
     ) -> ClassDecl<'a> {
         ClassDecl {
             name,
             fields,
             methods,
+            constructor,
         }
     }
 }
@@ -78,7 +83,7 @@ impl FieldDecl {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Scope {
     Static,
     Instance,
@@ -105,16 +110,16 @@ pub struct MethodDecl {
 impl MethodDecl {
     pub fn new(
         scope: Scope,
-        name: String,
+        name: &str,
         parameters: Vec<Parameter>,
-        type_name: String,
+        type_name: &str,
         block: Block,
     ) -> MethodDecl {
         MethodDecl {
             scope,
-            name,
+            name: name.to_owned(),
             parameters,
-            type_name,
+            type_name: type_name.to_owned(),
             block,
         }
     }

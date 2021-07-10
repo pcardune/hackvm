@@ -77,6 +77,7 @@ impl Namespace {
 
 pub struct Compiler {
     local_names: Namespace,
+    instance_names: Namespace,
     statics_table: StaticsTable,
 }
 
@@ -84,6 +85,7 @@ impl Compiler {
     pub fn new() -> Compiler {
         Compiler {
             local_names: Namespace::default(),
+            instance_names: Namespace::default(),
             statics_table: StaticsTable::new(),
         }
     }
@@ -92,17 +94,26 @@ impl Compiler {
         self.statics_table.clear();
         let mut commands: Vec<VMToken> = Vec::new();
         for class_decl in module.classes() {
+            self.instance_names.clear();
             for field in class_decl.fields() {
                 let scope = field.data().scope();
+                let name = field.data().name();
                 match scope {
                     Scope::Static => {
-                        let name = field.data().name();
                         if let Some(_) = self.statics_table.insert(class_decl.data().name(), name) {
                             return Err(anyhow!("Static field \"{}\" declared twice", name));
                         }
                     }
-                    Scope::Instance => todo!(),
+                    Scope::Instance => {
+                        let index = self.instance_names.register(name, &VMSegment::This);
+                        if index.is_none() {
+                            return Err(anyhow!("Instance field \"{}\" declared twice", name));
+                        }
+                    }
                 }
+            }
+            if let Some(constructor) = class_decl.data().constructor() {
+                commands.append(&mut self.compile_constructor(class_decl.name(), constructor)?);
             }
             for method in class_decl.methods() {
                 commands.append(&mut self.compile_method(class_decl.name(), method)?);
@@ -111,8 +122,7 @@ impl Compiler {
         return Ok(commands);
     }
 
-    fn compile_method(&mut self, class_name: &str, method: &MethodDecl) -> Result<Vec<VMToken>> {
-        let mut commands: Vec<VMToken> = Vec::new();
+    fn start_method(&mut self, method: &MethodDecl) -> Result<(Vec<VMToken>, usize)> {
         self.local_names.clear();
 
         for parameter in method.parameters() {
@@ -123,11 +133,35 @@ impl Compiler {
         let block_tokens = self.compile_block(method.block())?;
 
         let num_locals = self.local_names.segment_size(&VMSegment::Local);
-        let token = VMToken::Function(
+        Ok((block_tokens, num_locals))
+    }
+
+    fn compile_constructor(
+        &mut self,
+        class_name: &str,
+        constructor: &MethodDecl,
+    ) -> Result<Vec<VMToken>> {
+        let (block_tokens, num_locals) = self.start_method(constructor)?;
+        let num_instance_fields = self.instance_names.segment_size(&VMSegment::This);
+        let mut commands = vec![
+            VMToken::Function(format!("{}.new", class_name), num_locals as u16),
+            VMToken::Push(VMSegment::Constant, num_instance_fields as u16),
+            VMToken::Call("Memory.alloc".to_string(), 1),
+            VMToken::Pop(VMSegment::Pointer, 0),
+        ];
+        commands.append(&mut block_tokens.into());
+        commands.push(VMToken::Push(VMSegment::Pointer, 0));
+        commands.push(VMToken::Return);
+        Ok(commands)
+    }
+
+    fn compile_method(&mut self, class_name: &str, method: &MethodDecl) -> Result<Vec<VMToken>> {
+        let (block_tokens, num_locals) = self.start_method(method)?;
+
+        let mut commands = vec![VMToken::Function(
             format!("{}.{}", class_name, method.name()),
             num_locals as u16,
-        );
-        commands.push(token);
+        )];
         commands.append(&mut block_tokens.into());
         Ok(commands)
     }
@@ -153,30 +187,46 @@ impl Compiler {
     ) -> Result<Vec<VMToken>> {
         let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
         let dest_term = assignment_statement.dest_expr().term();
-        match dest_term {
+        let pop_token: VMToken = match dest_term {
             Term::BinaryOp(Op::Dot, left, right) => {
-                if let Some(class_name) = left.as_identifer() {
+                if let Some(left_identifier) = left.as_identifer() {
                     if let Some(field_name) = right.as_identifer() {
-                        if let Some(&index) = self.statics_table.get(&class_name, &field_name) {
-                            tokens.push(VMToken::Pop(VMSegment::Static, index as u16));
-                            return Ok(tokens);
+                        if left_identifier == "this" {
+                            if let Some((segment, index)) = self.instance_names.get(field_name) {
+                                VMToken::Pop(*segment, *index as u16)
+                            } else {
+                                return Err(anyhow!(
+                                    "instance field \"{}\" is not declared",
+                                    field_name
+                                ));
+                            }
+                        } else if let Some(&index) =
+                            self.statics_table.get(&left_identifier, &field_name)
+                        {
+                            VMToken::Pop(VMSegment::Static, index as u16)
+                        } else {
+                            panic!("Not sure how to assign to {:?}.{:?}", left, right);
                         }
+                    } else {
+                        panic!("Not sure how to assign to {:?}.{:?}", left, right);
                     }
+                } else {
+                    panic!("Not sure how to assign to {:?}.{:?}", left, right);
                 }
-                todo!()
             }
             Term::Identifier(name) => {
                 if let Some(&(segment, index)) = self.local_names.get(name) {
-                    tokens.push(VMToken::Pop(segment, index as u16));
-                    Ok(tokens)
+                    VMToken::Pop(segment, index as u16)
                 } else {
-                    Err(anyhow!("variable \"{}\" has never been declared", name))
+                    return Err(anyhow!("variable \"{}\" has never been declared", name));
                 }
             }
             _ => {
                 panic!("Don't know how to resolve term {:?}", dest_term)
             }
-        }
+        };
+        tokens.push(pop_token);
+        Ok(tokens)
     }
 
     fn compile_while_statement(
@@ -398,6 +448,42 @@ mod tests {
                 VMToken::Push(VMSegment::Argument, 0),
                 VMToken::Push(VMSegment::Argument, 1),
                 VMToken::Add,
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_constructor() {
+        let module = parse_module(
+            "
+            class Vector {
+                x: number;
+                y: number;
+                constructor(x: number, y: number) {
+                    this.x = x;
+                    this.y = y;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Vector.new".to_string(), 0),
+                // allocation for this
+                VMToken::Push(VMSegment::Constant, 2),
+                VMToken::Call("Memory.alloc".to_string(), 1),
+                VMToken::Pop(VMSegment::Pointer, 0),
+                // initialization
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Pop(VMSegment::This, 0),
+                VMToken::Push(VMSegment::Argument, 1),
+                VMToken::Pop(VMSegment::This, 1),
+                // implicit return this
+                VMToken::Push(VMSegment::Pointer, 0),
                 VMToken::Return,
             ]
         );

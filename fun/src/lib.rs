@@ -1,7 +1,7 @@
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 mod ast;
 mod compiler;
@@ -71,6 +71,7 @@ impl<'a> Node<'a, ClassDecl<'a>> {
             .to_string();
         let mut fields = vec![];
         let mut methods: Vec<MethodDecl> = vec![];
+        let mut constructor: Option<MethodDecl> = None;
         for pair in pairs {
             match pair.as_rule() {
                 Rule::static_field => {
@@ -91,10 +92,19 @@ impl<'a> Node<'a, ClassDecl<'a>> {
                 Rule::class_method => {
                     methods.push(parse_method_decl(pair, Scope::Instance)?);
                 }
+                Rule::constructor_decl => {
+                    if constructor.is_some() {
+                        return Err(anyhow!("constructor declared more than once"));
+                    }
+                    constructor = Some(parse_constructor_decl(pair)?);
+                }
                 _ => panic!("Not sure what to do with {:?}", pair),
             }
         }
-        Ok(Node::new(span, ClassDecl::new(name, fields, methods)))
+        Ok(Node::new(
+            span,
+            ClassDecl::new(name, fields, methods, constructor),
+        ))
     }
 }
 
@@ -121,26 +131,20 @@ fn parse_typed_identifier(pair: Pair<Rule>) -> Result<(String, String)> {
     ))
 }
 
+fn parse_constructor_decl(pair: Pair<Rule>) -> Result<MethodDecl> {
+    let mut pairs = pair.into_inner();
+    let parameters = parse_parameter_decl(pairs.next().expect("no parameter declaration found"))?;
+    let block = parse_block(pairs.next().expect("no block found"))?;
+    Ok(MethodDecl::new(Scope::Static, "new", parameters, "", block))
+}
+
 fn parse_method_decl(pair: Pair<Rule>, scope: Scope) -> Result<MethodDecl> {
     let mut pairs = pair.into_inner();
-    let name = pairs
-        .next()
-        .expect("no identifier found")
-        .as_str()
-        .to_string();
+    let name = pairs.next().expect("no identifier found").as_str();
     let parameters = parse_parameter_decl(pairs.next().expect("no parameter declaration found"))?;
-    let type_name = pairs
-        .next()
-        .expect("no identifier found")
-        .as_str()
-        .to_string();
-    Ok(MethodDecl::new(
-        scope,
-        name,
-        parameters,
-        type_name,
-        parse_block(pairs.next().expect("no block found"))?,
-    ))
+    let type_name = pairs.next().expect("no identifier found").as_str();
+    let block = parse_block(pairs.next().expect("no block found"))?;
+    Ok(MethodDecl::new(scope, name, parameters, type_name, block))
 }
 
 fn parse_parameter_decl(pair: Pair<Rule>) -> Result<Vec<Parameter>> {
@@ -378,6 +382,26 @@ mod tests {
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].name(), "other1");
         assert_eq!(params[0].type_name(), "Vector");
+    }
+
+    #[test]
+    fn test_class_constructor() {
+        let module = parse_module(
+            "
+            class Vector {
+                x: number;
+                y: number;
+                constructor(x: number, y: number) {
+                    this.x = x;
+                    this.y = y;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let constructor = module.classes()[0].data().constructor().as_ref();
+        assert!(constructor.is_some());
+        assert_eq!(constructor.unwrap().parameters().len(), 2);
     }
 
     #[test]

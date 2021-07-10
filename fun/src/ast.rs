@@ -59,6 +59,9 @@ impl<'a> ClassDecl<'a> {
 #[derive(Getters)]
 pub struct FieldDecl {
     #[getset(get = "pub")]
+    scope: Scope,
+
+    #[getset(get = "pub")]
     name: String,
 
     #[getset(get = "pub")]
@@ -66,8 +69,12 @@ pub struct FieldDecl {
 }
 
 impl FieldDecl {
-    pub fn new(name: String, type_name: String) -> FieldDecl {
-        FieldDecl { name, type_name }
+    pub fn new(scope: Scope, name: String, type_name: String) -> FieldDecl {
+        FieldDecl {
+            scope,
+            name,
+            type_name,
+        }
     }
 }
 
@@ -206,7 +213,7 @@ impl WhileStatement {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Op {
     Plus,
     Sub,
@@ -215,7 +222,7 @@ pub enum Op {
     Dot,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Term {
     Number(u64),
     Bool(bool),
@@ -278,7 +285,7 @@ impl Term {
     }
 }
 
-#[derive(Getters, Debug, PartialEq)]
+#[derive(Getters, Debug, PartialEq, Clone)]
 pub struct Expression {
     #[getset(get = "pub")]
     term: Term,

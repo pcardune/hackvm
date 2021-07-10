@@ -70,6 +70,12 @@ impl<'a> Node<'a, ClassDecl<'a>> {
         let mut methods: Vec<MethodDecl> = vec![];
         for pair in pairs {
             match pair.as_rule() {
+                Rule::static_field => {
+                    fields.push(parse_field_decl(
+                        pair.into_inner().next().unwrap(),
+                        Scope::Static,
+                    )?);
+                }
                 Rule::static_method => {
                     methods.push(parse_method_decl(
                         pair.into_inner().next().unwrap(),
@@ -77,7 +83,7 @@ impl<'a> Node<'a, ClassDecl<'a>> {
                     )?);
                 }
                 Rule::class_field => {
-                    fields.push(parse_field_decl(pair)?);
+                    fields.push(parse_field_decl(pair, Scope::Instance)?);
                 }
                 Rule::class_method => {
                     methods.push(parse_method_decl(pair, Scope::Instance)?);
@@ -89,11 +95,11 @@ impl<'a> Node<'a, ClassDecl<'a>> {
     }
 }
 
-fn parse_field_decl<'a>(pair: Pair<'a, Rule>) -> Result<Node<'a, FieldDecl>> {
+fn parse_field_decl<'a>(pair: Pair<'a, Rule>, scope: Scope) -> Result<Node<'a, FieldDecl>> {
     let span = pair.as_span();
     let typed_identifier = pair.into_inner().next().expect("no typed identifier...");
     let (name, type_name) = parse_typed_identifier(typed_identifier)?;
-    Ok(Node::new(span, FieldDecl::new(name, type_name)))
+    Ok(Node::new(span, FieldDecl::new(scope, name, type_name)))
 }
 
 fn parse_typed_identifier(pair: Pair<Rule>) -> Result<(String, String)> {
@@ -290,6 +296,22 @@ mod tests {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].data().name(), "x");
         assert_eq!(fields[0].data().type_name(), "number");
+    }
+
+    #[test]
+    fn test_class_static_fields() {
+        let module = parse_module(
+            "
+            class Main {
+                static counter: number;
+                step: number;
+            }
+        ",
+        )
+        .unwrap();
+        let fields = module.classes()[0].fields();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].data().scope(), &Scope::Static);
     }
 
     #[test]

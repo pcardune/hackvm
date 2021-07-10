@@ -75,6 +75,7 @@ statement = {
 }
 
 constructor_decl = { "constructor" ~ parameter_decl ~ block }
+static_field = { "static" ~ class_field}
 class_field = { typed_identifier ~ ";"}
 class_method = {
   identifier ~ parameter_decl ~ ":" ~ type_ref ~ block
@@ -84,6 +85,7 @@ static_method = {
 }
 class_decl = {
   "class" ~ identifier ~ "{" ~
+  static_field* ~
   static_method* ~
   class_field* ~
   constructor_decl? ~

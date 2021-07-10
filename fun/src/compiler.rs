@@ -1,26 +1,83 @@
 use core::panic;
 use std::collections::HashMap;
 
-use crate::ast::{AssignmentStatement, Block, WhileStatement};
+use crate::ast::{AssignmentStatement, Block, Scope, WhileStatement};
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
 use anyhow::anyhow;
 use anyhow::Result;
 use hackvm::{VMSegment, VMToken};
 
+struct StaticsTable {
+    index: usize,
+    static_names: HashMap<String, HashMap<String, usize>>,
+}
+
+impl StaticsTable {
+    pub fn new() -> StaticsTable {
+        StaticsTable {
+            index: 0,
+            static_names: HashMap::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.static_names.clear();
+        self.index = 0;
+    }
+
+    pub fn insert(&mut self, class_name: &str, field_name: &str) -> Option<usize> {
+        let mut inner_table = self.static_names.get_mut(class_name);
+        if inner_table.is_none() {
+            self.static_names
+                .insert(class_name.to_string(), HashMap::new());
+            inner_table = self.static_names.get_mut(class_name);
+        }
+        let inner_table = inner_table.unwrap();
+
+        let existing = inner_table.insert(field_name.to_string(), self.index);
+        if existing.is_none() {
+            self.index += 1;
+        }
+        existing
+    }
+
+    pub fn get(&self, class_name: &str, field_name: &str) -> Option<&usize> {
+        self.static_names
+            .get(class_name)
+            .map(|inner_map| inner_map.get(field_name))
+            .flatten()
+    }
+}
+
 pub struct Compiler {
     local_names: HashMap<String, usize>,
+    statics_table: StaticsTable,
 }
 
 impl Compiler {
     pub fn new() -> Compiler {
         Compiler {
             local_names: HashMap::new(),
+            statics_table: StaticsTable::new(),
         }
     }
 
     pub fn compile_module(&mut self, module: Module) -> Result<Vec<VMToken>> {
+        self.statics_table.clear();
         let mut commands: Vec<VMToken> = Vec::new();
         for class_decl in module.classes() {
+            for field in class_decl.fields() {
+                let scope = field.data().scope();
+                match scope {
+                    Scope::Static => {
+                        let name = field.data().name();
+                        if let Some(_) = self.statics_table.insert(class_decl.data().name(), name) {
+                            return Err(anyhow!("Static field \"{}\" declared twice", name));
+                        }
+                    }
+                    Scope::Instance => todo!(),
+                }
+            }
             for method in class_decl.methods() {
                 self.local_names.clear();
 
@@ -57,17 +114,31 @@ impl Compiler {
         &mut self,
         assignment_statement: &AssignmentStatement,
     ) -> Result<Vec<VMToken>> {
-        let name = &assignment_statement.dest_expr().term();
-        if let Term::Identifier(name) = name {
-            if let Some(&index) = self.local_names.get(name) {
-                let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
-                tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
-                Ok(tokens)
-            } else {
-                Err(anyhow!("variable \"{}\" has never been declared", name))
+        let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
+        let dest_term = assignment_statement.dest_expr().term();
+        match dest_term {
+            Term::BinaryOp(Op::Dot, left, right) => {
+                if let Some(class_name) = left.as_identifer() {
+                    if let Some(field_name) = right.as_identifer() {
+                        if let Some(&index) = self.statics_table.get(&class_name, &field_name) {
+                            tokens.push(VMToken::Pop(VMSegment::Static, index as u16));
+                            return Ok(tokens);
+                        }
+                    }
+                }
+                todo!()
             }
-        } else {
-            panic!("Don't know how to resolve term {:?}", name)
+            Term::Identifier(name) => {
+                if let Some(&index) = self.local_names.get(name) {
+                    tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
+                    Ok(tokens)
+                } else {
+                    Err(anyhow!("variable \"{}\" has never been declared", name))
+                }
+            }
+            _ => {
+                panic!("Don't know how to resolve term {:?}", dest_term)
+            }
         }
     }
 
@@ -132,6 +203,17 @@ impl Compiler {
     }
 
     fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
+        if op == &Op::Dot {
+            if let Some(class_name) = left.as_identifer() {
+                if let Some(field_name) = right.as_identifer() {
+                    if let Some(index) = self.statics_table.get(class_name, field_name) {
+                        return Ok(vec![VMToken::Push(VMSegment::Static, *index as u16)]);
+                    }
+                }
+            }
+            // need to implement nested . operator resolution
+            todo!()
+        }
         let mut tokens = self.compile_term(left)?;
         tokens.append(&mut self.compile_term(right)?);
         let op_token = match op {
@@ -178,6 +260,35 @@ mod tests {
                 VMToken::Add,
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Sub,
+                VMToken::Return
+            ]
+        )
+    }
+
+    #[test]
+    fn test_static_vars() {
+        let module = parse_module(
+            "
+            class Main {
+                static sum: number;
+
+                static main(): number {
+                    Main.sum = 3;
+                    return Main.sum;
+                }
+            }
+        ",
+        )
+        .unwrap();
+
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 0),
+                VMToken::Push(VMSegment::Constant, 3),
+                VMToken::Pop(VMSegment::Static, 0),
+                VMToken::Push(VMSegment::Static, 0),
                 VMToken::Return
             ]
         )

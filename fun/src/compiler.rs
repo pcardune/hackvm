@@ -1,3 +1,4 @@
+use core::panic;
 use std::collections::HashMap;
 
 use crate::ast::{AssignmentStatement, Block, WhileStatement};
@@ -56,13 +57,17 @@ impl Compiler {
         &mut self,
         assignment_statement: &AssignmentStatement,
     ) -> Result<Vec<VMToken>> {
-        let name = &assignment_statement.name()[..];
-        if let Some(&index) = self.local_names.get(name) {
-            let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
-            tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
-            Ok(tokens)
+        let name = &assignment_statement.dest_expr().term();
+        if let Term::Identifier(name) = name {
+            if let Some(&index) = self.local_names.get(name) {
+                let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
+                tokens.push(VMToken::Pop(VMSegment::Local, index as u16));
+                Ok(tokens)
+            } else {
+                Err(anyhow!("variable \"{}\" has never been declared", name))
+            }
         } else {
-            Err(anyhow!("variable \"{}\" has never been declared", name))
+            panic!("Don't know how to resolve term {:?}", name)
         }
     }
 
@@ -121,7 +126,7 @@ impl Compiler {
         match term {
             Term::Number(num) => return Ok(vec![VMToken::Push(VMSegment::Constant, *num as u16)]),
             Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
-            Term::Reference(name) => self.compile_reference(name),
+            Term::Identifier(name) => self.compile_reference(name),
             _ => panic!("Don't know how to compile {:?}", term),
         }
     }
@@ -134,6 +139,7 @@ impl Compiler {
             Op::Sub => VMToken::Sub,
             Op::Lt => VMToken::Lt,
             Op::Gt => VMToken::Gt,
+            _ => panic!("Don't know how to handle op {:?}", op),
         };
         tokens.push(op_token);
         Ok(tokens)

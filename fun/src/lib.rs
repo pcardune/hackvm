@@ -180,14 +180,12 @@ fn parse_let_statement(pair: Pair<Rule>) -> Result<LetStatement> {
 
 fn parse_assignment_statement(pair: Pair<Rule>) -> Result<AssignmentStatement> {
     let mut pairs = pair.into_inner();
-    let name = pairs
-        .next()
-        .expect("no reference found in assignement")
-        .as_str()
-        .to_string();
+    let left = pairs.next().expect("no expression to assign to");
+    let right = pairs.next().expect("no value to assign to expression");
 
-    let value_expr = parse_expr(pairs.next().expect("no expression found"))?;
-    Ok(AssignmentStatement::new(name, value_expr))
+    let dest_expr = parse_expr(left)?;
+    let value_expr = parse_expr(right)?;
+    Ok(AssignmentStatement::new(dest_expr, value_expr))
 }
 
 fn parse_while_statement(pair: Pair<Rule>) -> Result<WhileStatement> {
@@ -208,6 +206,7 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
                     "-" => Op::Sub,
                     "<" => Op::Lt,
                     ">" => Op::Gt,
+                    "." => Op::Dot,
                     other => panic!("Unrecognized operator {}", other),
                 };
                 let term_pair = pairs.next().expect("Operator without second term");
@@ -246,7 +245,7 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
                 }
                 return Ok(Term::Array(expressions));
             }
-            Rule::reference => return Ok(Term::Reference(pair.as_str().to_string())),
+            Rule::identifier => return Ok(Term::Identifier(pair.as_str().to_string())),
             _ => panic!("Not sure what to do with {:?}", pair),
         }
     }
@@ -371,6 +370,23 @@ mod tests {
         assert_eq!(term.as_number(), Some(0));
     }
 
+    #[test]
+    fn test_assignment_statement() {
+        let pair = FUNParser::parse(Rule::assignment_statement, "foo = 0;")
+            .expect("failed to parse")
+            .next()
+            .unwrap();
+        let assignment = parse_assignment_statement(pair).unwrap();
+        let dest = assignment
+            .dest_expr()
+            .term()
+            .as_identifer()
+            .expect("destination expression wasn't an identifier");
+        assert_eq!(dest, "foo");
+        let term = assignment.value_expr().term();
+        assert_eq!(term.as_number(), Some(0));
+    }
+
     mod expr {
         use super::*;
         fn parse_expr_from_str(s: &str) -> Expression {
@@ -414,6 +430,19 @@ mod tests {
             assert_eq!(op, &Op::Plus);
             assert_eq!(a.as_number(), Some(3));
             assert_eq!(b.as_number(), Some(4));
+        }
+
+        #[test]
+        fn test_dot_operator() {
+            let expr = parse_expr_from_str("foo.bar.baz");
+            assert_eq!(
+                expr.term(),
+                &Term::binary_op(
+                    Op::Dot,
+                    Term::binary_op(Op::Dot, Term::identifier("foo"), Term::identifier("bar")),
+                    Term::identifier("baz")
+                )
+            );
         }
     }
 }

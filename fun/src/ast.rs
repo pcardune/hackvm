@@ -174,15 +174,18 @@ impl LetStatement {
 #[derive(Getters, Debug)]
 pub struct AssignmentStatement {
     #[getset(get = "pub")]
-    name: String,
+    dest_expr: Expression,
 
     #[getset(get = "pub")]
     value_expr: Expression,
 }
 
 impl AssignmentStatement {
-    pub fn new(name: String, value_expr: Expression) -> AssignmentStatement {
-        AssignmentStatement { name, value_expr }
+    pub fn new(dest_expr: Expression, value_expr: Expression) -> AssignmentStatement {
+        AssignmentStatement {
+            dest_expr,
+            value_expr,
+        }
     }
 }
 
@@ -209,19 +212,35 @@ pub enum Op {
     Sub,
     Lt,
     Gt,
+    Dot,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Term {
     Number(u64),
     Bool(bool),
     String(String),
     Array(Vec<Expression>),
-    Reference(String),
+    Identifier(String),
     BinaryOp(Op, Box<Term>, Box<Term>),
 }
 
 impl Term {
+    pub fn binary_op(op: Op, left: Term, right: Term) -> Term {
+        Term::BinaryOp(op, Box::from(left), Box::from(right))
+    }
+
+    pub fn identifier(s: &str) -> Term {
+        Term::Identifier(s.to_string())
+    }
+
+    pub fn as_identifer(&self) -> Option<&str> {
+        if let Term::Identifier(val) = self {
+            Some(val)
+        } else {
+            None
+        }
+    }
     pub fn as_number(&self) -> Option<u64> {
         if let Term::Number(val) = self {
             Some(*val)
@@ -259,7 +278,7 @@ impl Term {
     }
 }
 
-#[derive(Getters, Debug)]
+#[derive(Getters, Debug, PartialEq)]
 pub struct Expression {
     #[getset(get = "pub")]
     term: Term,

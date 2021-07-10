@@ -285,8 +285,26 @@ impl Compiler {
             Term::Number(num) => return Ok(vec![VMToken::Push(VMSegment::Constant, *num as u16)]),
             Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
             Term::Identifier(name) => self.compile_reference(name),
+            Term::New(class_name, arguments) => self.compile_call(class_name, "new", arguments),
             _ => panic!("Don't know how to compile {:?}", term),
         }
+    }
+
+    fn compile_call(
+        &mut self,
+        class_name: &str,
+        func_name: &str,
+        arguments: &[Expression],
+    ) -> Result<Vec<VMToken>> {
+        let mut tokens: Vec<VMToken> = Vec::new();
+        for expression in arguments {
+            tokens.append(&mut self.compile_expression(expression)?);
+        }
+        tokens.push(VMToken::Call(
+            format!("{}.{}", class_name, func_name),
+            arguments.len() as u16,
+        ));
+        return Ok(tokens);
     }
 
     fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
@@ -299,15 +317,7 @@ impl Compiler {
                         }
                     }
                     Term::Call(func_name, arguments) => {
-                        let mut tokens: Vec<VMToken> = Vec::new();
-                        for expression in arguments {
-                            tokens.append(&mut self.compile_expression(expression)?);
-                        }
-                        tokens.push(VMToken::Call(
-                            format!("{}.{}", class_name, func_name),
-                            arguments.len() as u16,
-                        ));
-                        return Ok(tokens);
+                        return self.compile_call(class_name, func_name, arguments);
                     }
                     _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
                 };
@@ -448,6 +458,30 @@ mod tests {
                 VMToken::Push(VMSegment::Argument, 0),
                 VMToken::Push(VMSegment::Argument, 1),
                 VMToken::Add,
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_new_expr() {
+        let module = parse_module(
+            "
+            class Counter {
+                static create(): Vector {
+                    return new Counter();
+                }
+                n: number;
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Counter.create".to_string(), 0),
+                VMToken::Call("Counter.new".to_string(), 0),
                 VMToken::Return,
             ]
         );

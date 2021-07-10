@@ -236,6 +236,7 @@ pub enum Term {
     Identifier(String),
     BinaryOp(Op, Box<Term>, Box<Term>),
     Call(String, Vec<Expression>),
+    New(String, Vec<Expression>),
 }
 
 impl Term {

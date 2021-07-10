@@ -232,6 +232,21 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     Ok(Expression::new(result))
 }
 
+fn parse_new_expr(pair: Pair<Rule>) -> Result<Term> {
+    assert!(pair.as_rule() == Rule::new_expr);
+    let mut pairs = pair.into_inner();
+    let call_term = parse_call_expr(
+        pairs
+            .next()
+            .expect("new expression didn't start with call_expr"),
+    )?;
+    if let Term::Call(func_name, arguments) = call_term {
+        Ok(Term::New(func_name, arguments))
+    } else {
+        panic!("Didn't get a call term back from parse_call_expr");
+    }
+}
+
 fn parse_call_expr(pair: Pair<Rule>) -> Result<Term> {
     assert!(pair.as_rule() == Rule::call_expr);
     let mut pairs = pair.into_inner();
@@ -274,6 +289,9 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
             }
             Rule::call_expr => {
                 return parse_call_expr(pair);
+            }
+            Rule::new_expr => {
+                return parse_new_expr(pair);
             }
             Rule::identifier => return Ok(Term::Identifier(pair.as_str().to_string())),
             _ => panic!(
@@ -490,6 +508,21 @@ mod tests {
                     vec![
                         Expression::new(Term::identifier("a")),
                         Expression::new(Term::identifier("b"))
+                    ]
+                )
+            )
+        }
+
+        #[test]
+        fn test_new_expr() {
+            let expr = parse_expr_from_str("new Vector(x, y)");
+            assert_eq!(
+                expr.term(),
+                &Term::New(
+                    "Vector".to_string(),
+                    vec![
+                        Expression::new(Term::identifier("x")),
+                        Expression::new(Term::identifier("y"))
                     ]
                 )
             )

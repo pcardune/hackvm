@@ -37,9 +37,6 @@ binary_operator = _{
   | cmp_eq
 }
 
-// reference = {
-//   identifier ~ ("." ~ identifier)*
-// }
 call_expr = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")"}
 new_expr = { "new" ~ call_expr }
 term = {

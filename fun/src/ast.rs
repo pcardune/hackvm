@@ -230,6 +230,7 @@ pub enum Term {
     Array(Vec<Expression>),
     Identifier(String),
     BinaryOp(Op, Box<Term>, Box<Term>),
+    Call(String, Vec<Expression>),
 }
 
 impl Term {

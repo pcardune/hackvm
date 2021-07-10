@@ -228,6 +228,20 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     Ok(Expression::new(result))
 }
 
+fn parse_call_expr(pair: Pair<Rule>) -> Result<Term> {
+    assert!(pair.as_rule() == Rule::call_expr);
+    let mut pairs = pair.into_inner();
+    let func_name = pairs
+        .next()
+        .expect("call expression didn't start with identifier")
+        .as_str();
+    let mut arguments: Vec<Expression> = Vec::new();
+    for pair in pairs {
+        arguments.push(parse_expr(pair)?);
+    }
+    Ok(Term::Call(func_name.to_owned(), arguments))
+}
+
 fn parse_term(pair: Pair<Rule>) -> Result<Term> {
     for pair in pair.into_inner() {
         match pair.as_rule() {
@@ -254,8 +268,15 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
                 }
                 return Ok(Term::Array(expressions));
             }
+            Rule::call_expr => {
+                return parse_call_expr(pair);
+            }
             Rule::identifier => return Ok(Term::Identifier(pair.as_str().to_string())),
-            _ => panic!("Not sure what to do with {:?}", pair),
+            _ => panic!(
+                "Not sure what to do with rule {:?}: {}",
+                pair.as_rule(),
+                pair.as_str()
+            ),
         }
     }
     panic!("No term found?");
@@ -433,6 +454,21 @@ mod tests {
             assert_eq!(array_term[0].term().as_number(), Some(1));
             assert_eq!(array_term[1].term().as_number(), Some(2));
             assert_eq!(array_term[2].term().as_number(), Some(3));
+        }
+
+        #[test]
+        fn test_call_expr() {
+            let expr = parse_expr_from_str("someFunc(a, b)");
+            assert_eq!(
+                expr.term(),
+                &Term::Call(
+                    "someFunc".to_string(),
+                    vec![
+                        Expression::new(Term::identifier("a")),
+                        Expression::new(Term::identifier("b"))
+                    ]
+                )
+            )
         }
 
         #[test]

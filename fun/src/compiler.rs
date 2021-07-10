@@ -242,14 +242,28 @@ impl Compiler {
     fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
         if op == &Op::Dot {
             if let Some(class_name) = left.as_identifer() {
-                if let Some(field_name) = right.as_identifer() {
-                    if let Some(index) = self.statics_table.get(class_name, field_name) {
-                        return Ok(vec![VMToken::Push(VMSegment::Static, *index as u16)]);
+                match right {
+                    Term::Identifier(field_name) => {
+                        if let Some(index) = self.statics_table.get(class_name, field_name) {
+                            return Ok(vec![VMToken::Push(VMSegment::Static, *index as u16)]);
+                        }
                     }
-                }
+                    Term::Call(func_name, arguments) => {
+                        let mut tokens: Vec<VMToken> = Vec::new();
+                        for expression in arguments {
+                            tokens.append(&mut self.compile_expression(expression)?);
+                        }
+                        tokens.push(VMToken::Call(
+                            format!("{}.{}", class_name, func_name),
+                            arguments.len() as u16,
+                        ));
+                        return Ok(tokens);
+                    }
+                    _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
+                };
             }
             // need to implement nested . operator resolution
-            todo!()
+            panic!("Not sure what to do with {:?} dot {:?}", left, right);
         }
         let mut tokens = self.compile_term(left)?;
         tokens.append(&mut self.compile_term(right)?);
@@ -352,6 +366,39 @@ mod tests {
                 VMToken::Push(VMSegment::Argument, 1),
                 VMToken::Add,
                 VMToken::Return
+            ]
+        );
+    }
+
+    #[test]
+    fn test_function_calls() {
+        let module = parse_module(
+            "
+            class Math {
+                static square(a: number): number {
+                    return Math.add(a, a);
+                }
+                static add(a: number, b: number): number {
+                    return a + b;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Math.square".to_string(), 0),
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Call("Math.add".to_string(), 2),
+                VMToken::Return,
+                VMToken::Function("Math.add".to_string(), 0),
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Push(VMSegment::Argument, 1),
+                VMToken::Add,
+                VMToken::Return,
             ]
         );
     }

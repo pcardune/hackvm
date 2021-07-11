@@ -23,7 +23,7 @@ use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatem
 
 pub fn compile(input: &str) -> Result<Vec<VMToken>> {
     let module = parse_module(input)?;
-    ModuleCompiler::new().compile_module(module)
+    ModuleCompiler::new(&module).compile()
 }
 
 pub fn parse_module(input: &str) -> Result<Module> {

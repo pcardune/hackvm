@@ -1,42 +1,38 @@
 use getset::Getters;
-use pest::Span;
 
 #[derive(Getters)]
-pub struct Module<'a> {
+pub struct Module {
     #[getset(get = "pub")]
-    classes: Vec<Node<'a, ClassDecl<'a>>>,
+    classes: Vec<Node<ClassDecl>>,
 }
 
-impl<'a> Module<'a> {
-    pub fn new(classes: Vec<Node<'a, ClassDecl<'a>>>) -> Module<'a> {
+impl Module {
+    pub fn new(classes: Vec<Node<ClassDecl>>) -> Module {
         Module { classes }
     }
 }
 
 #[derive(Getters)]
-pub struct Node<'a, T: ?Sized> {
-    #[getset(get = "pub")]
-    span: Span<'a>,
+pub struct Node<T: ?Sized> {
     #[getset(get = "pub")]
     data: Box<T>,
 }
 
-impl<'a, T> Node<'a, T> {
-    pub fn new(span: Span<'a>, data: T) -> Node<'a, T> {
+impl<T> Node<T> {
+    pub fn new(data: T) -> Node<T> {
         Node {
-            span,
             data: Box::from(data),
         }
     }
 }
 
 #[derive(Getters)]
-pub struct ClassDecl<'a> {
+pub struct ClassDecl {
     #[getset(get = "pub")]
     name: String,
 
     #[getset(get = "pub")]
-    fields: Vec<Node<'a, FieldDecl>>,
+    fields: Vec<Node<FieldDecl>>,
 
     #[getset(get = "pub")]
     methods: Vec<MethodDecl>,
@@ -45,13 +41,13 @@ pub struct ClassDecl<'a> {
     constructor: Option<MethodDecl>,
 }
 
-impl<'a> ClassDecl<'a> {
+impl ClassDecl {
     pub fn new(
         name: String,
-        fields: Vec<Node<'a, FieldDecl>>,
+        fields: Vec<Node<FieldDecl>>,
         methods: Vec<MethodDecl>,
         constructor: Option<MethodDecl>,
-    ) -> ClassDecl<'a> {
+    ) -> ClassDecl {
         ClassDecl {
             name,
             fields,

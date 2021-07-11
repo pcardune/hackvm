@@ -10,7 +10,7 @@ mod parser;
 use ast::{
     AssignmentStatement, Block, ClassDecl, Expression, Module, Node, Parameter, Scope, Term,
 };
-use compiler::Compiler;
+use compiler::ModuleCompiler;
 use hackvm::VMToken;
 use parser::{FUNParser, Rule};
 use pest::Parser;
@@ -23,7 +23,7 @@ use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatem
 
 pub fn compile(input: &str) -> Result<Vec<VMToken>> {
     let module = parse_module(input)?;
-    Compiler::new().compile_module(module)
+    ModuleCompiler::new().compile_module(module)
 }
 
 pub fn parse_module(input: &str) -> Result<Module> {
@@ -48,7 +48,7 @@ pub fn parse_module(input: &str) -> Result<Module> {
     return Ok(Module::new(classes));
 }
 
-impl<'a> Node<'a, ClassDecl<'a>> {
+impl Node<ClassDecl> {
     pub fn name(&self) -> &str {
         self.data().name()
     }
@@ -61,7 +61,7 @@ impl<'a> Node<'a, ClassDecl<'a>> {
         self.data().methods()
     }
 
-    fn from_pair(pair: Pair<'a, Rule>) -> Result<Node<'a, ClassDecl>> {
+    fn from_pair(pair: Pair<Rule>) -> Result<Node<ClassDecl>> {
         let span = pair.as_span();
         let mut pairs = pair.into_inner();
         let name = pairs
@@ -101,18 +101,20 @@ impl<'a> Node<'a, ClassDecl<'a>> {
                 _ => panic!("Not sure what to do with {:?}", pair),
             }
         }
-        Ok(Node::new(
-            span,
-            ClassDecl::new(name, fields, methods, constructor),
-        ))
+        Ok(Node::new(ClassDecl::new(
+            name,
+            fields,
+            methods,
+            constructor,
+        )))
     }
 }
 
-fn parse_field_decl<'a>(pair: Pair<'a, Rule>, scope: Scope) -> Result<Node<'a, FieldDecl>> {
+fn parse_field_decl<'a>(pair: Pair<'a, Rule>, scope: Scope) -> Result<Node<FieldDecl>> {
     let span = pair.as_span();
     let typed_identifier = pair.into_inner().next().expect("no typed identifier...");
     let (name, type_name) = parse_typed_identifier(typed_identifier)?;
-    Ok(Node::new(span, FieldDecl::new(scope, name, type_name)))
+    Ok(Node::new(FieldDecl::new(scope, name, type_name)))
 }
 
 fn parse_typed_identifier(pair: Pair<Rule>) -> Result<(String, String)> {

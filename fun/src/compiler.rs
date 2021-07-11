@@ -2,11 +2,11 @@ use core::panic;
 use std::collections::HashMap;
 use std::usize;
 
-use crate::ast::{AssignmentStatement, Block, MethodDecl, Scope, WhileStatement};
+use crate::ast::{AssignmentStatement, Block, ClassDecl, MethodDecl, Node, Scope, WhileStatement};
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
 use anyhow::anyhow;
 use anyhow::Result;
-use hackvm::{VMSegment, VMToken};
+use hackvm::{VMCommand, VMSegment, VMToken};
 
 struct StaticsTable {
     index: usize,
@@ -75,15 +75,15 @@ impl Namespace {
     }
 }
 
-pub struct Compiler {
+pub struct ModuleCompiler {
     local_names: Namespace,
     instance_names: Namespace,
     statics_table: StaticsTable,
 }
 
-impl Compiler {
-    pub fn new() -> Compiler {
-        Compiler {
+impl ModuleCompiler {
+    pub fn new() -> ModuleCompiler {
+        ModuleCompiler {
             local_names: Namespace::default(),
             instance_names: Namespace::default(),
             statics_table: StaticsTable::new(),
@@ -94,32 +94,38 @@ impl Compiler {
         self.statics_table.clear();
         let mut commands: Vec<VMToken> = Vec::new();
         for class_decl in module.classes() {
-            self.instance_names.clear();
-            for field in class_decl.fields() {
-                let scope = field.data().scope();
-                let name = field.data().name();
-                match scope {
-                    Scope::Static => {
-                        if let Some(_) = self.statics_table.insert(class_decl.data().name(), name) {
-                            return Err(anyhow!("Static field \"{}\" declared twice", name));
-                        }
+            commands.append(&mut self.compile_class_decl(class_decl)?)
+        }
+        return Ok(commands);
+    }
+
+    fn compile_class_decl(&mut self, class_decl: &Node<ClassDecl>) -> Result<Vec<VMToken>> {
+        self.instance_names.clear();
+        for field in class_decl.fields() {
+            let scope = field.data().scope();
+            let name = field.data().name();
+            match scope {
+                Scope::Static => {
+                    if let Some(_) = self.statics_table.insert(class_decl.data().name(), name) {
+                        return Err(anyhow!("Static field \"{}\" declared twice", name));
                     }
-                    Scope::Instance => {
-                        let index = self.instance_names.register(name, &VMSegment::This);
-                        if index.is_none() {
-                            return Err(anyhow!("Instance field \"{}\" declared twice", name));
-                        }
+                }
+                Scope::Instance => {
+                    let index = self.instance_names.register(name, &VMSegment::This);
+                    if index.is_none() {
+                        return Err(anyhow!("Instance field \"{}\" declared twice", name));
                     }
                 }
             }
-            if let Some(constructor) = class_decl.data().constructor() {
-                commands.append(&mut self.compile_constructor(class_decl.name(), constructor)?);
-            }
-            for method in class_decl.methods() {
-                commands.append(&mut self.compile_method(class_decl.name(), method)?);
-            }
         }
-        return Ok(commands);
+        let mut commands: Vec<VMToken> = Vec::new();
+        if let Some(constructor) = class_decl.data().constructor() {
+            commands.append(&mut self.compile_constructor(class_decl.name(), constructor)?);
+        }
+        for method in class_decl.methods() {
+            commands.append(&mut self.compile_method(class_decl.name(), method)?);
+        }
+        Ok(commands)
     }
 
     fn start_method(&mut self, method: &MethodDecl) -> Result<(Vec<VMToken>, usize)> {
@@ -274,7 +280,7 @@ impl Compiler {
         Ok(commands)
     }
 
-    fn compile_reference(&mut self, reference: &String) -> Result<Vec<VMToken>> {
+    fn compile_reference(&mut self, reference: &str) -> Result<Vec<VMToken>> {
         if let Some(&(segment, index)) = self.local_names.get(reference) {
             return Ok(vec![VMToken::Push(segment, index as u16)]);
         }
@@ -333,26 +339,40 @@ impl Compiler {
                         todo!("Not sure how to deal with this.{:?}", right);
                     }
                 },
-                class_name => {
-                    let tokens = match right {
-                        Term::Identifier(static_field_name) => {
-                            if let Some(index) =
-                                self.statics_table.get(class_name, static_field_name)
-                            {
-                                vec![VMToken::Push(VMSegment::Static, *index as u16)]
-                            } else {
-                                panic!(
+                left_identifier => {
+                    // first try local variables
+                    match self.local_names.get(left_identifier) {
+                        Some(_) => {
+                            // we're doing an instance field lookup on a local/argument variable
+                            // that must be a pointer, so update the That segment to point to it.
+                            let mut tokens = self.compile_reference(left_identifier)?;
+                            tokens.push(VMToken::Pop(VMSegment::Pointer, 1));
+
+                            todo!()
+                        }
+                        None => {
+                            // we're doing a static field lookup on a class
+                            let tokens = match right {
+                                Term::Identifier(static_field_name) => {
+                                    if let Some(index) =
+                                        self.statics_table.get(left_identifier, static_field_name)
+                                    {
+                                        vec![VMToken::Push(VMSegment::Static, *index as u16)]
+                                    } else {
+                                        panic!(
                                     "Not sure how to resolve identifier lookup {:?} dot {:?}",
                                     left, right
                                 );
-                            }
+                                    }
+                                }
+                                Term::Call(func_name, arguments) => {
+                                    self.compile_call(left_identifier, func_name, arguments)?
+                                }
+                                _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
+                            };
+                            Ok(tokens)
                         }
-                        Term::Call(func_name, arguments) => {
-                            self.compile_call(class_name, func_name, arguments)?
-                        }
-                        _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
-                    };
-                    Ok(tokens)
+                    }
                 }
             },
             _ => {
@@ -401,7 +421,7 @@ mod tests {
         )
         .unwrap();
 
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -432,7 +452,7 @@ mod tests {
         )
         .unwrap();
 
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -457,7 +477,7 @@ mod tests {
         ",
         )
         .unwrap();
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -485,7 +505,7 @@ mod tests {
         ",
         )
         .unwrap();
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -516,7 +536,7 @@ mod tests {
         ",
         )
         .unwrap();
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -542,7 +562,7 @@ mod tests {
         ",
         )
         .unwrap();
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -577,7 +597,7 @@ mod tests {
         ",
         )
         .unwrap();
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[
@@ -587,6 +607,54 @@ mod tests {
                 VMToken::Pop(VMSegment::Pointer, 0),
                 // resolution of this.y
                 VMToken::Push(VMSegment::This, 1),
+                // return
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "Not yet implemented"]
+    fn test_dot_resolution_for_local_vars() {
+        let module = parse_module(
+            "
+            class Vector {
+                static add(v1: Vector, v2: Vector): Vector {
+                    return new Vector(v1.x+v2.x, v1.y+v2.y);
+                }
+
+                x: number;
+                y: number;
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Vector.add".to_string(), 0),
+                // push v1.x
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Pop(VMSegment::Pointer, 1),
+                VMToken::Push(VMSegment::That, 0),
+                // push v2.x
+                VMToken::Push(VMSegment::Argument, 1),
+                VMToken::Pop(VMSegment::Pointer, 1),
+                VMToken::Push(VMSegment::That, 0),
+                // v1.x + v2.x
+                VMToken::Add,
+                // push v1.y
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Pop(VMSegment::Pointer, 1),
+                VMToken::Push(VMSegment::That, 1),
+                // push v2.y
+                VMToken::Push(VMSegment::Argument, 1),
+                VMToken::Pop(VMSegment::Pointer, 1),
+                VMToken::Push(VMSegment::That, 1),
+                // v1.y + v2.y
+                VMToken::Add,
+                VMToken::Call("Vector.new".to_string(), 2),
                 // return
                 VMToken::Return,
             ]
@@ -612,7 +680,7 @@ mod tests {
         )
         .unwrap();
 
-        let vmcode = Compiler::new().compile_module(module).unwrap();
+        let vmcode = ModuleCompiler::new().compile_module(module).unwrap();
         assert_eq!(
             &vmcode,
             &[

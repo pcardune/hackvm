@@ -162,6 +162,10 @@ impl Compiler {
             format!("{}.{}", class_name, method.name()),
             num_locals as u16,
         )];
+        if method.scope() == &Scope::Instance {
+            commands.push(VMToken::Push(VMSegment::Argument, 0));
+            commands.push(VMToken::Pop(VMSegment::Pointer, 0));
+        }
         commands.append(&mut block_tokens.into());
         Ok(commands)
     }
@@ -307,23 +311,59 @@ impl Compiler {
         return Ok(tokens);
     }
 
-    fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
-        if op == &Op::Dot {
-            if let Some(class_name) = left.as_identifer() {
-                match right {
-                    Term::Identifier(field_name) => {
-                        if let Some(index) = self.statics_table.get(class_name, field_name) {
-                            return Ok(vec![VMToken::Push(VMSegment::Static, *index as u16)]);
+    fn compile_dot_op(&mut self, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
+        match left {
+            Term::Identifier(left_identifier) => match &left_identifier[..] {
+                "this" => match right {
+                    Term::Identifier(instance_field_name) => {
+                        match self.instance_names.get(instance_field_name) {
+                            Some((segment, index)) => {
+                                Ok(vec![VMToken::Push(*segment, *index as u16)])
+                            }
+                            None => Err(anyhow!(
+                                "instance field \"{}\" has not been declared",
+                                instance_field_name
+                            )),
                         }
                     }
-                    Term::Call(func_name, arguments) => {
-                        return self.compile_call(class_name, func_name, arguments);
+                    Term::Call(_func_name, _arguments) => {
+                        todo!("Not sure how to call instance methods yet");
                     }
-                    _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
-                };
+                    _ => {
+                        todo!("Not sure how to deal with this.{:?}", right);
+                    }
+                },
+                class_name => {
+                    let tokens = match right {
+                        Term::Identifier(static_field_name) => {
+                            if let Some(index) =
+                                self.statics_table.get(class_name, static_field_name)
+                            {
+                                vec![VMToken::Push(VMSegment::Static, *index as u16)]
+                            } else {
+                                panic!(
+                                    "Not sure how to resolve identifier lookup {:?} dot {:?}",
+                                    left, right
+                                );
+                            }
+                        }
+                        Term::Call(func_name, arguments) => {
+                            self.compile_call(class_name, func_name, arguments)?
+                        }
+                        _ => panic!("Not sure what to do with {:?} dot {:?}", left, right),
+                    };
+                    Ok(tokens)
+                }
+            },
+            _ => {
+                panic!("Not sure how to resolve {:?} dot {:?}", left, right);
             }
-            // need to implement nested . operator resolution
-            panic!("Not sure what to do with {:?} dot {:?}", left, right);
+        }
+    }
+
+    fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
+        if op == &Op::Dot {
+            return self.compile_dot_op(left, right);
         }
         let mut tokens = self.compile_term(left)?;
         tokens.append(&mut self.compile_term(right)?);
@@ -518,6 +558,36 @@ mod tests {
                 VMToken::Pop(VMSegment::This, 1),
                 // implicit return this
                 VMToken::Push(VMSegment::Pointer, 0),
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_this_resolution() {
+        let module = parse_module(
+            "
+            class Vector {
+                x: number;
+                y: number;
+                getY(): number {
+                    return this.y;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = Compiler::new().compile_module(module).unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Vector.getY".to_string(), 0),
+                // implicit this segment
+                VMToken::Push(VMSegment::Argument, 0),
+                VMToken::Pop(VMSegment::Pointer, 0),
+                // resolution of this.y
+                VMToken::Push(VMSegment::This, 1),
+                // return
                 VMToken::Return,
             ]
         );

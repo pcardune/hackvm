@@ -212,8 +212,15 @@ fn parse_while_statement(pair: Pair<Rule>) -> Result<WhileStatement> {
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     let climber: PrecClimber<Rule> = PrecClimber::new(vec![
-        Operator::new(Rule::cmp_lt, Assoc::Left) | Operator::new(Rule::cmp_gt, Assoc::Left),
+        Operator::new(Rule::cmp_lte, Assoc::Left) | {
+            Operator::new(Rule::cmp_lt, Assoc::Left)
+                | Operator::new(Rule::cmp_gte, Assoc::Left)
+                | Operator::new(Rule::cmp_gt, Assoc::Left)
+                | Operator::new(Rule::cmp_ne, Assoc::Left)
+                | Operator::new(Rule::cmp_eq, Assoc::Left)
+        },
         Operator::new(Rule::plus, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
+        Operator::new(Rule::multiply, Assoc::Left) | Operator::new(Rule::divide, Assoc::Left),
         Operator::new(Rule::dot, Assoc::Left),
     ]);
 
@@ -222,8 +229,14 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
         let op = match op.as_rule() {
             Rule::plus => Op::Plus,
             Rule::sub => Op::Sub,
+            Rule::multiply => Op::Multiply,
+            Rule::divide => Op::Divide,
             Rule::cmp_lt => Op::Lt,
+            Rule::cmp_lte => Op::Lte,
             Rule::cmp_gt => Op::Gt,
+            Rule::cmp_gte => Op::Gte,
+            Rule::cmp_eq => Op::Eq,
+            Rule::cmp_ne => Op::Ne,
             Rule::dot => Op::Dot,
             other => panic!("Unrecognized operator {:?}", other),
         };
@@ -567,21 +580,25 @@ mod tests {
 
         #[test]
         fn test_operator_precendence() {
-            let expr = parse_expr_from_str("foo.bar + other.baz.zap");
+            let expr = parse_expr_from_str("foo.bar + other.baz.zap == 3");
             assert_eq!(
                 expr.term(),
                 &Term::binary_op(
-                    Op::Plus,
-                    Term::binary_op(Op::Dot, Term::identifier("foo"), Term::identifier("bar")),
+                    Op::Eq,
                     Term::binary_op(
-                        Op::Dot,
+                        Op::Plus,
+                        Term::binary_op(Op::Dot, Term::identifier("foo"), Term::identifier("bar")),
                         Term::binary_op(
                             Op::Dot,
-                            Term::identifier("other"),
-                            Term::identifier("baz")
-                        ),
-                        Term::identifier("zap")
-                    )
+                            Term::binary_op(
+                                Op::Dot,
+                                Term::identifier("other"),
+                                Term::identifier("baz")
+                            ),
+                            Term::identifier("zap")
+                        )
+                    ),
+                    Term::Number(3)
                 )
             )
         }

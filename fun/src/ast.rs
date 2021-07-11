@@ -218,8 +218,14 @@ impl WhileStatement {
 pub enum Op {
     Plus,
     Sub,
+    Multiply,
+    Divide,
     Lt,
+    Lte,
     Gt,
+    Gte,
+    Eq,
+    Ne,
     Dot,
 }
 

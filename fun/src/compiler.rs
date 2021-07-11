@@ -1,4 +1,5 @@
 use core::panic;
+use getset::Getters;
 use std::collections::HashMap;
 use std::usize;
 
@@ -108,9 +109,11 @@ pub use types::*;
 mod types {
     use super::*;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Getters)]
     pub struct ObjectTypeField {
-        type_name: String,
+        #[getset(get = "pub")]
+        type_id: usize,
+        #[getset(get = "pub")]
         index: usize,
     }
     #[derive(Debug, Default)]
@@ -121,15 +124,12 @@ mod types {
         pub fn get_field(&self, field_name: &str) -> Option<&ObjectTypeField> {
             self.fields.get(field_name)
         }
-        pub fn add_field(&mut self, field_name: &str, field_type: &str) -> Result<()> {
+        pub fn add_field(&mut self, name: &str, type_id: usize) -> Result<()> {
             let index = self.fields.len();
-            let field = ObjectTypeField {
-                type_name: field_type.to_string(),
-                index,
-            };
+            let field = ObjectTypeField { type_id, index };
             self.fields
-                .push(field_name, field)
-                .map_err(|_| anyhow!("field {} already declared", field_name))
+                .push(name, field)
+                .map_err(|_| anyhow!("field {} already declared", name))
         }
     }
 
@@ -143,6 +143,9 @@ mod types {
         }
         pub fn get(&self, name: &str) -> Option<&ObjectType> {
             self.types.get(name)
+        }
+        pub fn get_by_id(&self, id: usize) -> Option<&ObjectType> {
+            self.types.get_at(id)
         }
         pub fn add_type(&mut self, name: &str, obj_type: ObjectType) -> Result<()> {
             self.types
@@ -267,7 +270,7 @@ mod module {
                                 .object_types
                                 .get_mut(class_decl.data().name())
                                 .expect("object types should be found");
-                            obj_type.add_field(name, type_name)?;
+                            obj_type.add_field(name, field_type_id)?;
                         }
                     }
                 }
@@ -617,21 +620,33 @@ impl<'class> MethodDeclCompiler<'class> {
                 left_identifier => {
                     // first try local variables
                     match self.local_names.get(left_identifier) {
-                        Some(_) => {
+                        Some(left_mem_ref) => {
                             // we're doing an instance field lookup on a local/argument variable
                             // that must be a pointer, so update the That segment to point to it.
-                            let mut tokens = self.compile_reference(left_identifier)?;
-                            tokens.push(VMToken::Pop(VMSegment::Pointer, 1));
+                            let mut tokens = vec![
+                                left_mem_ref.as_push_token(),
+                                VMToken::Pop(VMSegment::Pointer, 1),
+                            ];
                             // now we need to resolve the field based on the type that it is.
+                            let left_obj_type = self
+                                .module_compiler()
+                                .get_object_types()
+                                .get_by_id(left_mem_ref.type_id)
+                                .expect("wasn't able to get ObjectType from MemRef");
                             let dest = match right {
                                 Term::Identifier(instance_field_name) => {
-                                    if let Some(mem_ref) =
-                                        self.class_compiler.get_instance_field(instance_field_name)
-                                    {
-                                        mem_ref.as_push_token()
-                                    } else {
-                                        todo!()
-                                    }
+                                    let instance_field =
+                                        match left_obj_type.get_field(instance_field_name) {
+                                            Some(field) => field,
+                                            None => {
+                                                return Err(anyhow!(
+                                                    "Field {} does not exist on {}",
+                                                    instance_field_name,
+                                                    left_identifier
+                                                ))
+                                            }
+                                        };
+                                    VMToken::Push(VMSegment::That, *instance_field.index() as u16)
                                 }
                                 _ => {
                                     todo!(
@@ -640,7 +655,8 @@ impl<'class> MethodDeclCompiler<'class> {
                                     )
                                 }
                             };
-                            todo!()
+                            tokens.push(dest);
+                            Ok(tokens)
                         }
                         None => {
                             // we're doing a static field lookup on a class
@@ -685,7 +701,8 @@ impl<'class> MethodDeclCompiler<'class> {
             Op::Sub => VMToken::Sub,
             Op::Lt => VMToken::Lt,
             Op::Gt => VMToken::Gt,
-            _ => panic!("Don't know how to handle op {:?}", op),
+            Op::Eq => VMToken::Eq,
+            _ => todo!("Don't know how to handle op {:?}", op),
         };
         tokens.push(op_token);
         Ok(tokens)
@@ -908,7 +925,32 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Not yet implemented"]
+    fn test_dot_precedence() {
+        let module = parse_module(
+            "
+            class Counter {
+                static count: number;
+                static atTheEnd(): void {
+                    return Counter.count == 10;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Counter.atTheEnd".to_string(), 0),
+                VMToken::Push(VMSegment::Static, 0),
+                VMToken::Push(VMSegment::Constant, 10),
+                VMToken::Eq,
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
     fn test_dot_resolution_for_local_vars() {
         let module = parse_module(
             "

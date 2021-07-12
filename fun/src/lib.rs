@@ -8,7 +8,8 @@ mod compiler;
 mod parser;
 
 use ast::{
-    AssignmentStatement, Block, ClassDecl, Expression, Module, Node, Parameter, Scope, Term,
+    AssignmentStatement, Block, ClassDecl, Expression, IfStatement, Module, Node, Parameter, Scope,
+    Term,
 };
 use compiler::ModuleCompiler;
 use hackvm::VMToken;
@@ -165,6 +166,7 @@ fn parse_block(pair: Pair<Rule>) -> Result<Block> {
             let statement: Statement = match pair.as_rule() {
                 Rule::let_statement => Statement::Let(parse_let_statement(pair)?),
                 Rule::while_statement => Statement::While(parse_while_statement(pair)?),
+                Rule::if_statement => Statement::If(parse_if_statement(pair)?),
                 Rule::return_statement => {
                     let expr = if let Some(pair) = pair.into_inner().next() {
                         parse_expr(pair)?
@@ -212,6 +214,17 @@ fn parse_while_statement(pair: Pair<Rule>) -> Result<WhileStatement> {
     let condition_expr = parse_expr(pairs.next().expect("no condition expression found"))?;
     let block = parse_block(pairs.next().expect("no block found in while statement"))?;
     Ok(WhileStatement::new(condition_expr, block))
+}
+
+fn parse_if_statement(pair: Pair<Rule>) -> Result<IfStatement> {
+    let mut pairs = pair.into_inner();
+    let condition_expr = parse_expr(pairs.next().expect("no condition expression found"))?;
+    let block = parse_block(pairs.next().expect("no block found in while statement"))?;
+    let else_block = match pairs.next() {
+        Some(pair) => Some(parse_block(pair)?),
+        None => None,
+    };
+    Ok(IfStatement::new(condition_expr, block, else_block))
 }
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
@@ -453,6 +466,9 @@ mod tests {
                     sum = sum + i;
                     i = i + 1;
                 }
+                if (i < 20) {
+                    sum = sum + sum;
+                }
                 Logger.log(sum);
                 return sum;
             }",
@@ -461,7 +477,7 @@ mod tests {
         .next()
         .unwrap();
         let block = parse_block(pair).unwrap();
-        assert_eq!(block.statements().len(), 6);
+        assert_eq!(block.statements().len(), 7);
     }
 
     #[test]
@@ -475,6 +491,20 @@ mod tests {
         assert_eq!(let_statement.type_name(), "number");
         let term = let_statement.value_expr().term();
         assert_eq!(term.as_number(), Some(0));
+    }
+
+    #[test]
+    fn test_if_statement() {
+        let pair = FUNParser::parse(
+            Rule::if_statement,
+            "if (true) { yay = 1; } else { yay = 2; }",
+        )
+        .expect("failed to parse")
+        .next()
+        .unwrap();
+        let if_statement = parse_if_statement(pair).unwrap();
+        assert_eq!(if_statement.condition_expr().term().as_bool(), Some(true));
+        assert!(if_statement.else_block().is_some());
     }
 
     #[test]

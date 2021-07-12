@@ -150,6 +150,7 @@ impl Block {
 pub enum Statement {
     Let(LetStatement),
     While(WhileStatement),
+    If(IfStatement),
     Return(Expression),
     Assignment(AssignmentStatement),
     Expr(Expression),
@@ -210,6 +211,26 @@ impl WhileStatement {
         WhileStatement {
             condition_expr,
             block,
+        }
+    }
+}
+
+#[derive(Getters, Debug)]
+pub struct IfStatement {
+    #[getset(get = "pub")]
+    condition_expr: Expression,
+    #[getset(get = "pub")]
+    block: Block,
+    #[getset(get = "pub")]
+    else_block: Option<Block>,
+}
+
+impl IfStatement {
+    pub fn new(condition_expr: Expression, block: Block, else_block: Option<Block>) -> IfStatement {
+        IfStatement {
+            condition_expr,
+            block,
+            else_block,
         }
     }
 }

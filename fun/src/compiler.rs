@@ -3,7 +3,9 @@ use getset::Getters;
 use std::collections::HashMap;
 use std::usize;
 
-use crate::ast::{AssignmentStatement, Block, ClassDecl, MethodDecl, Node, Scope, WhileStatement};
+use crate::ast::{
+    AssignmentStatement, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, WhileStatement,
+};
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -537,6 +539,28 @@ impl<'class> MethodDeclCompiler<'class> {
         Ok(tokens)
     }
 
+    fn compile_if_statement(&mut self, if_statement: &IfStatement) -> Result<Vec<VMToken>> {
+        let end_label = "IF_END".to_string();
+        let else_end_label = "IF_ELSE_END".to_string();
+
+        // condition check
+        let mut tokens = self.compile_expression(if_statement.condition_expr())?;
+        tokens.push(VMToken::Not);
+        tokens.push(VMToken::If(end_label.clone()));
+        // if block
+        tokens.append(&mut self.compile_block(if_statement.block())?);
+        if if_statement.else_block().is_some() {
+            tokens.push(VMToken::Goto(else_end_label.clone()))
+        }
+        // else block
+        tokens.push(VMToken::Label(end_label));
+        if let Some(else_block) = if_statement.else_block() {
+            tokens.append(&mut self.compile_block(else_block)?);
+            tokens.push(VMToken::Label(else_end_label));
+        }
+        Ok(tokens)
+    }
+
     fn compile_while_statement(
         &mut self,
         while_statement: &WhileStatement,
@@ -575,6 +599,9 @@ impl<'class> MethodDeclCompiler<'class> {
                 Statement::Expr(expression) => {
                     commands.append(&mut self.compile_expression(expression)?);
                     commands.push(VMToken::Pop(VMSegment::Temp, 0));
+                }
+                Statement::If(if_statement) => {
+                    commands.append(&mut self.compile_if_statement(if_statement)?);
                 }
             }
         }
@@ -1123,6 +1150,58 @@ mod tests {
                 VMToken::Call("Vector.new".to_string(), 2),
                 // return
                 VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_if() {
+        let module = parse_module(
+            "
+            class Main {
+                static main(): number {
+                    let a: number = 1;
+                    if (a < 10) {
+                        a = a+1;
+                    } else {
+                        a = a-1;
+                    }
+                    return a;
+                }
+            }
+        ",
+        )
+        .unwrap();
+
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 1),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Pop(VMSegment::Local, 0),
+                // if condition
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Push(VMSegment::Constant, 10),
+                VMToken::Lt,
+                VMToken::Not,
+                VMToken::If("IF_END".to_string()),
+                // true block
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Add,
+                VMToken::Pop(VMSegment::Local, 0),
+                VMToken::Goto("IF_ELSE_END".to_string()),
+                // false block
+                VMToken::Label("IF_END".to_string()),
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Sub,
+                VMToken::Pop(VMSegment::Local, 0),
+                VMToken::Label("IF_ELSE_END".to_string()),
+                // return
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Return
             ]
         );
     }

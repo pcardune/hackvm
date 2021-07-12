@@ -75,12 +75,14 @@ block = { "{" ~ statement* ~ "}"}
 // STATEMENTS
 let_statement = { "let " ~ typed_identifier ~ "=" ~ expr ~ ";" }
 while_statement = { "while" ~ "(" ~ expr ~ ")" ~ block }
+if_statement = { "if" ~ "(" ~ expr ~ ")" ~ block ~ ("else" ~ block)?}
 return_statement = { "return " ~ expr ~ ";" }
 assignment_statement = { expr ~ "=" ~ expr ~ ";"}
 expr_statement = { expr ~ ";"}
 statement = {
   let_statement
   | while_statement
+  | if_statement
   | return_statement
   | assignment_statement
   | expr_statement

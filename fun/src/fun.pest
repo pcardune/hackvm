@@ -4,7 +4,10 @@ identifier = @{(ASCII_ALPHA | "_")+ ~ ASCII_ALPHANUMERIC*}
 
 bool = { "true" | "false" }
 number = { ASCII_DIGIT+ }
-string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\""}
+string = @{ 
+  ("\"" ~ (!"\"" ~ ANY)* ~ "\"")
+  | ("'" ~ (!"'" ~ ANY)* ~ "'")
+  }
 array = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]"}
 
 unary_operator = {

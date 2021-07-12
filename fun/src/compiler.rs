@@ -116,11 +116,19 @@ mod types {
         #[getset(get = "pub")]
         index: usize,
     }
-    #[derive(Debug, Default)]
+    #[derive(Debug, Getters, Clone)]
     pub struct ObjectType {
+        #[getset(get = "pub")]
+        name: String,
         fields: OrderedMap<ObjectTypeField>,
     }
     impl ObjectType {
+        pub fn new(name: &str) -> ObjectType {
+            ObjectType {
+                name: name.to_string(),
+                fields: OrderedMap::default(),
+            }
+        }
         pub fn get_field(&self, field_name: &str) -> Option<&ObjectTypeField> {
             self.fields.get(field_name)
         }
@@ -242,12 +250,14 @@ mod module {
             // start by adding built-in types
             for type_name in &["number", "bool"] {
                 self.object_types
-                    .add_type(type_name, ObjectType::default())?;
+                    .add_type(type_name, ObjectType::new(type_name))?;
             }
 
             for class_decl in self.module.classes() {
-                self.object_types
-                    .add_type(class_decl.data().name(), ObjectType::default())?;
+                self.object_types.add_type(
+                    class_decl.data().name(),
+                    ObjectType::new(class_decl.data().name()),
+                )?;
             }
 
             for class_decl in self.module.classes() {
@@ -587,8 +597,23 @@ impl<'class> MethodDeclCompiler<'class> {
             Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
             Term::Identifier(name) => self.compile_reference(name),
             Term::New(class_name, arguments) => self.compile_call(class_name, "new", arguments),
+            Term::String(ascii) => self.compile_string_constant(ascii),
             _ => panic!("Don't know how to compile {:?}", term),
         }
+    }
+
+    fn compile_string_constant(&mut self, ascii: &str) -> Result<Vec<VMToken>> {
+        let mut tokens = vec![
+            VMToken::Push(VMSegment::Constant, ascii.len() as u16),
+            VMToken::Call("String.new".to_string(), 1),
+        ];
+
+        for &char in ascii.as_bytes() {
+            tokens.push(VMToken::Push(VMSegment::Constant, char as u16));
+            tokens.push(VMToken::Call("String.appendChar".to_string(), 2));
+        }
+
+        Ok(tokens)
     }
 
     fn compile_call(
@@ -604,6 +629,23 @@ impl<'class> MethodDeclCompiler<'class> {
         tokens.push(VMToken::Call(
             format!("{}.{}", class_name, func_name),
             arguments.len() as u16,
+        ));
+        return Ok(tokens);
+    }
+
+    fn compile_method_call(
+        &mut self,
+        class_name: &str,
+        func_name: &str,
+        arguments: &[Expression],
+    ) -> Result<Vec<VMToken>> {
+        let mut tokens: Vec<VMToken> = Vec::new();
+        for expression in arguments {
+            tokens.append(&mut self.compile_expression(expression)?);
+        }
+        tokens.push(VMToken::Call(
+            format!("{}.{}", class_name, func_name),
+            arguments.len() as u16 + 1,
         ));
         return Ok(tokens);
     }
@@ -643,8 +685,9 @@ impl<'class> MethodDeclCompiler<'class> {
                                 .module_compiler()
                                 .get_object_types()
                                 .get_by_id(left_mem_ref.type_id)
-                                .expect("wasn't able to get ObjectType from MemRef");
-                            let dest = match right {
+                                .expect("wasn't able to get ObjectType from MemRef")
+                                .clone(); // TODO: see about removing this clone?
+                            let mut dest = match right {
                                 Term::Identifier(instance_field_name) => {
                                     let instance_field =
                                         match left_obj_type.get_field(instance_field_name) {
@@ -657,7 +700,19 @@ impl<'class> MethodDeclCompiler<'class> {
                                                 ))
                                             }
                                         };
-                                    VMToken::Push(VMSegment::That, *instance_field.index() as u16)
+                                    vec![VMToken::Push(
+                                        VMSegment::That,
+                                        *instance_field.index() as u16,
+                                    )]
+                                }
+                                Term::Call(func_name, arguments) => {
+                                    let mut tokens = vec![VMToken::Push(VMSegment::Pointer, 1)];
+                                    tokens.append(&mut self.compile_method_call(
+                                        left_obj_type.name(),
+                                        func_name,
+                                        arguments,
+                                    )?);
+                                    tokens
                                 }
                                 _ => {
                                     todo!(
@@ -666,7 +721,7 @@ impl<'class> MethodDeclCompiler<'class> {
                                     )
                                 }
                             };
-                            tokens.push(dest);
+                            tokens.append(&mut dest);
                             Ok(tokens)
                         }
                         None => {
@@ -713,6 +768,7 @@ impl<'class> MethodDeclCompiler<'class> {
             Op::Lt => VMToken::Lt,
             Op::Gt => VMToken::Gt,
             Op::Eq => VMToken::Eq,
+            Op::Multiply => VMToken::Call("Math.multiply".to_string(), 2),
             _ => todo!("Don't know how to handle op {:?}", op),
         };
         tokens.push(op_token);
@@ -753,6 +809,43 @@ mod tests {
                 VMToken::Add,
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Sub,
+                VMToken::Return
+            ]
+        )
+    }
+
+    #[test]
+    fn test_string_values() {
+        let module = parse_module(
+            "
+            class Main {
+                static main(): string {
+                    return \"hello\";
+                }
+            }
+        ",
+        )
+        .unwrap();
+
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 0),
+                // construct string
+                VMToken::Push(VMSegment::Constant, 5),
+                VMToken::Call("String.new".to_string(), 1),
+                // append to string
+                VMToken::Push(VMSegment::Constant, 'h' as u16),
+                VMToken::Call("String.appendChar".to_string(), 2),
+                VMToken::Push(VMSegment::Constant, 'e' as u16),
+                VMToken::Call("String.appendChar".to_string(), 2),
+                VMToken::Push(VMSegment::Constant, 'l' as u16),
+                VMToken::Call("String.appendChar".to_string(), 2),
+                VMToken::Push(VMSegment::Constant, 'l' as u16),
+                VMToken::Call("String.appendChar".to_string(), 2),
+                VMToken::Push(VMSegment::Constant, 'o' as u16),
+                VMToken::Call("String.appendChar".to_string(), 2),
                 VMToken::Return
             ]
         )

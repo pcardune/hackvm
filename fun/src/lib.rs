@@ -176,7 +176,11 @@ fn parse_block(pair: Pair<Rule>) -> Result<Block> {
                 Rule::assignment_statement => {
                     Statement::Assignment(parse_assignment_statement(pair)?)
                 }
-                Rule::expr_statement => Statement::Expr,
+                Rule::expr_statement => Statement::Expr(parse_expr(
+                    pair.into_inner()
+                        .next()
+                        .expect("expression statement should contain expression"),
+                )?),
                 _ => panic!("Not sure what to do with {}", pair),
             };
             statements.push(statement);

@@ -445,6 +445,14 @@ impl<'class> MethodDeclCompiler<'class> {
             commands.push(VMToken::Pop(VMSegment::Pointer, 0));
         }
         commands.append(&mut block_tokens.into());
+        // add an implicit return is there wasn't an explicit one
+        match commands.last() {
+            Some(VMToken::Return) => {}
+            _ => {
+                commands.push(VMToken::Push(VMSegment::Constant, 0));
+                commands.push(VMToken::Return);
+            }
+        }
         Ok(commands)
     }
 
@@ -554,7 +562,10 @@ impl<'class> MethodDeclCompiler<'class> {
                 Statement::Assignment(assignment_statement) => {
                     commands.append(&mut self.compile_assignment_statement(assignment_statement)?);
                 }
-                _ => panic!("Can't handle {:?}", statement),
+                Statement::Expr(expression) => {
+                    commands.append(&mut self.compile_expression(expression)?);
+                    commands.push(VMToken::Pop(VMSegment::Temp, 0));
+                }
             }
         }
         Ok(commands)
@@ -853,6 +864,32 @@ mod tests {
             &[
                 VMToken::Function("Counter.create".to_string(), 0),
                 VMToken::Call("Counter.new".to_string(), 0),
+                VMToken::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_expr_statement_without_return() {
+        let module = parse_module(
+            "
+            class Main {
+                static main(): void {
+                    Output.printInt(1); // side effects
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 0),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Call("Output.printInt".to_string(), 1),
+                VMToken::Pop(VMSegment::Temp, 0),
+                VMToken::Push(VMSegment::Constant, 0),
                 VMToken::Return,
             ]
         );

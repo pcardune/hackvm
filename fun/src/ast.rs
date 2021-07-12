@@ -152,7 +152,7 @@ pub enum Statement {
     While(WhileStatement),
     Return(Expression),
     Assignment(AssignmentStatement),
-    Expr,
+    Expr(Expression),
 }
 
 #[derive(Getters, Debug)]

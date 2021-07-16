@@ -1,8 +1,12 @@
 function Sys.init 2
 push constant 0
 pop local 0
-push constant 1
+push constant 3
+push constant 4
+call Vector.new 2
 pop local 1
+push constant 1
+pop static 0
 label WHILE
 push local 0
 push constant 4
@@ -13,11 +17,45 @@ push local 0
 push constant 1
 add
 pop local 0
-push local 1
-push local 1
-add
-pop local 1
+push static 0
+push static 0
+call Sys.add 2
+pop static 0
 goto WHILE
 label WHILE_END
-push local 1
+push static 0
+return
+function Sys.add 0
+push argument 0
+push argument 1
+add
+return
+function Vector.new 0
+push constant 2
+call Memory.alloc 1
+pop pointer 0
+push argument 0
+pop this 0
+push argument 1
+pop this 1
+push pointer 0
+return
+function Memory.alloc 1
+label WHILE
+push static 1
+push constant 0
+eq
+not
+if-goto WHILE_END
+push constant 1000
+pop static 1
+goto WHILE
+label WHILE_END
+push static 1
+pop local 0
+push static 1
+push argument 0
+add
+pop static 1
+push local 0
 return

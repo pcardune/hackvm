@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "lib": ["ES6"],
+    "strict": true
+  },
+  "files": ["Main.fun"]
+}

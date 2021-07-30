@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "noLib": true,
+    "strict": true
+  },
+  "files": ["Sys.fun", "Memory.fun"]
+}

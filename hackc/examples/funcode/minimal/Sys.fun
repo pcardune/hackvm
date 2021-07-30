@@ -25,15 +25,3 @@ class Vector {
     this.y = y;
   }
 }
-
-class Memory {
-  static end: number;
-  static alloc(size: number): number {
-    while (Memory.end == 0) {
-      Memory.end = 1000;
-    }
-    let pointer: number = Memory.end;
-    Memory.end = Memory.end + size;
-    return pointer;
-  }
-}

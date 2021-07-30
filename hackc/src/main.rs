@@ -365,7 +365,8 @@ impl Executable {
         if fun_file_paths.len() > 0 && self.include_os {
             #[rustfmt::skip]
             let os_files = vec![
-                ("MemoryFoo.vm", std::include_str!("../examples/funcode/OS/MemoryFoo.fun"))
+                ("Sys.fun", std::include_str!("../examples/funcode/OS/Sys.fun")),
+                ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun"))
             ];
 
             fun_files.extend(

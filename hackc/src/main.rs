@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use clap::{App, Arg};
-use hackvm::TokenizedProgram;
+use hackvm::{TokenizedFile, TokenizedProgram, VMToken};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -56,6 +56,103 @@ impl FileType {
     }
 }
 
+trait FunFile {
+    fn path(&self) -> &Path;
+    fn compile(&self) -> Result<FunFileBackedVMFile>;
+}
+#[derive(Clone, Copy)]
+struct StaticFunFile {
+    filename: &'static str,
+    content: &'static str,
+}
+impl StaticFunFile {
+    pub fn new(filename: &'static str, content: &'static str) -> StaticFunFile {
+        StaticFunFile { filename, content }
+    }
+}
+impl FunFile for StaticFunFile {
+    fn path(&self) -> &Path {
+        Path::new(self.filename)
+    }
+
+    fn compile(&self) -> Result<FunFileBackedVMFile> {
+        let vmcode = fun::compile(self.content)
+            .with_context(|| format!("failed compiling {} to vmcode", self.filename))?;
+        Ok(FunFileBackedVMFile {
+            source: Box::new(*self),
+            tokens: vmcode,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct FileBackedFunFile {
+    path: std::path::PathBuf,
+}
+impl FileBackedFunFile {
+    pub fn new(path: &std::path::Path) -> FileBackedFunFile {
+        FileBackedFunFile {
+            path: path.to_path_buf(),
+        }
+    }
+}
+impl FunFile for FileBackedFunFile {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn compile(&self) -> Result<FunFileBackedVMFile> {
+        let content = fs::read_to_string(&self.path)
+            .with_context(|| format!("Failed to read file {}", self.path.to_string_lossy()))?;
+        let vmcode = fun::compile(&content).with_context(|| {
+            format!("failed compiling {} to vmcode", self.path.to_string_lossy())
+        })?;
+        Ok(FunFileBackedVMFile {
+            source: Box::new(self.clone()),
+            tokens: vmcode,
+        })
+    }
+}
+
+struct FunFileBackedVMFile {
+    source: Box<dyn FunFile>,
+    tokens: Vec<VMToken>,
+}
+
+impl FunFileBackedVMFile {
+    pub fn file_name(&self) -> String {
+        let mut name = self.source.path().to_path_buf();
+        name.set_extension("vm");
+        name.file_name()
+            .expect("FunFile path should be a file")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    pub fn tokens(&self) -> &[VMToken] {
+        &self.tokens
+    }
+
+    pub fn to_tokenized_file(&self) -> Result<TokenizedFile> {
+        TokenizedFile::from_tokens(&self.file_name(), &self.tokens).map_err(|e| anyhow!("{}", e))
+    }
+
+    pub fn write_to_dir(&self, output_dir: &Path) -> Result<()> {
+        let mut output_path = output_dir.to_path_buf();
+        output_path.push(self.file_name());
+
+        let mut file = File::create(&output_path)
+            .with_context(|| format!("Failed writing to {:?}", output_path))?;
+        for token in self.tokens().iter() {
+            let mut line = token.to_string();
+            line.push('\n');
+            file.write(line.as_bytes())
+                .with_context(|| format!("Failed writing to {:?}", file))?;
+        }
+        Ok(())
+    }
+}
+
 struct CompilerInput {
     path: std::path::PathBuf,
 }
@@ -78,21 +175,6 @@ impl CompilerInput {
                     paths.push(path);
                 }
             }
-            // let entries =
-            //     std::fs::read_dir(&self.path).with_context(|| "Failed reading directory")?;
-            // let entries = entries.filter_map(|entry| {
-            //     entry
-            //         .map(|e| {
-            //             let path = e.path();
-            //             if path.is_file() {
-            //                 Some(path)
-            //             } else {
-            //                 None
-            //             }
-            //         })
-            //         .transpose()
-            // });
-            // Ok(entries)
         }
         Ok(paths)
     }
@@ -249,6 +331,7 @@ struct Executable {
     out_dir: PathBuf,
     runtime: Runtime,
     include_os: bool,
+    output_vmfiles: bool,
 }
 
 impl Executable {
@@ -258,6 +341,7 @@ impl Executable {
             out_dir: out_dir.to_path_buf(),
             runtime: Runtime::default(),
             include_os: false,
+            output_vmfiles: true,
         }
     }
 
@@ -272,33 +356,59 @@ impl Executable {
     }
 
     fn compile(&self) -> Result<PathBuf> {
-        let fun_files = self.compiler_input.get_files(FileType::FUN)?;
+        let fun_file_paths = self.compiler_input.get_files(FileType::FUN)?;
+        let mut fun_files = fun_file_paths
+            .iter()
+            .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
+            .collect::<Vec<_>>();
 
-        for path in fun_files.iter() {
-            let content = fs::read_to_string(path).with_context(|| "Failed to read file")?;
-            let vmcode = fun::compile(&content).with_context(|| {
-                format!("failed compiling {} to vmcode", path.to_string_lossy())
-            })?;
-            let mut output_path = path.clone();
-            output_path.set_extension("vm");
-            let mut file = File::create(&output_path)?;
-            for token in vmcode.iter() {
-                let mut line = token.to_string();
-                line.push('\n');
-                file.write(line.as_bytes())
-                    .with_context(|| format!("Failed writing to {:?}", file))?;
+        if fun_file_paths.len() > 0 && self.include_os {
+            #[rustfmt::skip]
+            let os_files = vec![
+                ("MemoryFoo.vm", std::include_str!("../examples/funcode/OS/MemoryFoo.fun"))
+            ];
+
+            fun_files.extend(
+                os_files
+                    .iter()
+                    .map(|(filename, content)| -> Box<dyn FunFile> {
+                        Box::new(StaticFunFile::new(filename, content))
+                    }),
+            );
+        }
+
+        let vmfiles = fun_files
+            .iter()
+            .map(|fun_file| fun_file.compile())
+            .collect::<Result<Vec<_>>>()?;
+
+        if self.output_vmfiles {
+            let mut out_dir = self.out_dir.clone();
+            out_dir.push("vmcode");
+            fs::create_dir_all(&out_dir)
+                .with_context(|| format!("Failed creating directory {:?}", out_dir))?;
+            for vmfile in vmfiles.iter() {
+                vmfile.write_to_dir(&out_dir)?;
             }
         }
 
-        let vm_files = self.compiler_input.get_files(FileType::VM)?;
+        let vmfiles = vmfiles
+            .iter()
+            .map(|e| e.to_tokenized_file())
+            .collect::<Result<Vec<_>>>()?;
 
-        let tokenized_program =
-            get_tokenized_program(&vm_files, self.include_os).with_context(|| {
-                format!(
-                    "Failed tokenizing program {}",
-                    self.compiler_input.path.to_string_lossy()
-                )
-            })?;
+        let mut tokenized_program = get_tokenized_program(
+            &self.compiler_input.get_files(FileType::VM)?,
+            self.include_os,
+        )
+        .with_context(|| {
+            format!(
+                "Failed tokenizing program {}",
+                self.compiler_input.path.to_string_lossy()
+            )
+        })?;
+
+        tokenized_program.replace_files(vmfiles);
 
         let asm_out_path = self.out_dir.join("out.asm");
         compile_vm_to_asm(&tokenized_program, &asm_out_path)

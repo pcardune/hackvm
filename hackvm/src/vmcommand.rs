@@ -275,7 +275,7 @@ pub struct TokenizedFile {
 }
 
 impl TokenizedFile {
-    fn from_tokens(name: &str, tokens: &[Token]) -> Result<TokenizedFile, String> {
+    pub fn from_tokens(name: &str, tokens: &[Token]) -> Result<TokenizedFile, String> {
         let iter = GroupByBound::new(tokens, |token| match token {
             Token::Function(_, _) => true,
             _ => false,
@@ -291,13 +291,40 @@ impl TokenizedFile {
     }
 }
 
+#[derive(Default)]
 pub struct TokenizedProgram {
     pub files: Vec<TokenizedFile>,
 }
 
 impl TokenizedProgram {
     pub fn from_files(files: &[(&str, &str)]) -> Result<TokenizedProgram, String> {
-        let tokenized_files = files
+        let mut program = TokenizedProgram::default();
+        program.append_files(files)?;
+        Ok(program)
+    }
+
+    pub fn replace_file(&mut self, file: TokenizedFile) {
+        for existing_file in self.files.iter_mut() {
+            if existing_file.name == file.name {
+                *existing_file = file;
+                return;
+            }
+        }
+        self.files.push(file);
+    }
+
+    pub fn replace_files(&mut self, files: Vec<TokenizedFile>) {
+        for file in files {
+            self.replace_file(file);
+        }
+    }
+
+    pub fn append_tokenized_files(&mut self, files: &mut Vec<TokenizedFile>) {
+        self.files.append(files);
+    }
+
+    pub fn append_files(&mut self, files: &[(&str, &str)]) -> Result<(), String> {
+        let mut tokenized_files = files
             .iter()
             .map(|(filename, content)| {
                 parse_lines(content)
@@ -321,9 +348,8 @@ impl TokenizedProgram {
                 }
             })
             .collect::<Result<Vec<TokenizedFile>, String>>()?;
-        Ok(TokenizedProgram {
-            files: tokenized_files,
-        })
+        self.files.append(&mut tokenized_files);
+        Ok(())
     }
 }
 

@@ -13,8 +13,8 @@ use web_sys::{CanvasRenderingContext2d, ImageData};
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 pub use vmcommand::{
-    Command as VMCommand, Operation as VMOperation, Segment as VMSegment, TokenizedProgram,
-    VMProgram,
+    Command as VMCommand, Operation as VMOperation, Segment as VMSegment, TokenizedFile,
+    TokenizedProgram, VMProgram,
 };
 pub use vmemulator::{EmulatorRAM as VMEmulatorRAM, VMEmulator};
 pub use vmparser::Token as VMToken;

@@ -7,8 +7,8 @@ use crate::ast::{
     AssignmentStatement, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, WhileStatement,
 };
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::{anyhow, Context};
 use hackvm::{VMSegment, VMToken};
 
 #[derive(Default)]
@@ -171,6 +171,8 @@ mod types {
 pub use module::ModuleCompiler;
 
 mod module {
+    use anyhow::Context;
+
     use super::*;
 
     #[derive(Default)]
@@ -250,7 +252,9 @@ mod module {
 
         pub fn compile(mut self) -> Result<Vec<VMToken>> {
             // start by adding built-in types
-            for type_name in &["number", "bool"] {
+            // TODO: make types support generics and use that
+            // instead of number[]
+            for type_name in &["number", "bool", "number[]"] {
                 self.object_types
                     .add_type(type_name, ObjectType::new(type_name))?;
             }
@@ -266,7 +270,14 @@ mod module {
                 for field in class_decl.fields() {
                     let name = field.data().name();
                     let type_name = field.data().type_name();
-                    let field_type_id = self.resolve_type(type_name)?;
+                    let field_type_id = self.resolve_type(type_name).with_context(|| {
+                        format!(
+                            "Could not resolve type {} for field {} in class {}",
+                            type_name,
+                            name,
+                            class_decl.name()
+                        )
+                    })?;
                     match field.data().scope() {
                         Scope::Static => {
                             if let Some(_) = self.statics_table.insert(
@@ -305,6 +316,8 @@ mod module {
 }
 
 mod class {
+    use anyhow::Context;
+
     use super::*;
     pub struct ClassDeclCompiler<'module> {
         module_compiler: &'module ModuleCompiler<'module>,
@@ -352,7 +365,8 @@ mod class {
                             name,
                             &VMSegment::This,
                             self.module_compiler
-                                .resolve_type(field.data().type_name())?,
+                                .resolve_type(field.data().type_name())
+                                .with_context(|| format!("Could not resolve type {} for instance field {} in class {}", field.data().type_name(), field.data().name(), self.class_decl.name()))?,
                         );
                         if index.is_none() {
                             return Err(anyhow!("Instance field \"{}\" declared twice", name));
@@ -413,7 +427,16 @@ impl<'class> MethodDeclCompiler<'class> {
             self.local_names.register(
                 parameter.name(),
                 &VMSegment::Argument,
-                self.module_compiler().resolve_type(parameter.type_name())?,
+                self.module_compiler()
+                    .resolve_type(parameter.type_name())
+                    .with_context(|| {
+                        format!(
+                            "Could not resolve type name {} for parameter {} in method {}",
+                            parameter.type_name(),
+                            parameter.name(),
+                            self.method.name()
+                        )
+                    })?,
             );
         }
 
@@ -474,7 +497,14 @@ impl<'class> MethodDeclCompiler<'class> {
             name,
             &VMSegment::Local,
             self.module_compiler()
-                .resolve_type(let_statement.type_name())?,
+                .resolve_type(let_statement.type_name())
+                .with_context(|| {
+                    format!(
+                        "Could not resolve type name {} for let statement {}",
+                        let_statement.type_name(),
+                        let_statement.name(),
+                    )
+                })?,
         );
         if let Some(index) = index {
             let mut tokens = self.compile_expression(let_statement.value_expr())?;
@@ -494,7 +524,7 @@ impl<'class> MethodDeclCompiler<'class> {
     ) -> Result<Vec<VMToken>> {
         let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
         let dest_term = assignment_statement.dest_expr().term();
-        let pop_token: VMToken = match dest_term {
+        let mut dest_tokens: Vec<VMToken> = match dest_term {
             Term::BinaryOp(Op::Dot, left, right) => {
                 if let Some(left_identifier) = left.as_identifer() {
                     if let Some(field_name) = right.as_identifer() {
@@ -502,7 +532,7 @@ impl<'class> MethodDeclCompiler<'class> {
                             if let Some(mem_ref) =
                                 self.class_compiler.get_instance_field(field_name)
                             {
-                                mem_ref.as_pop_token()
+                                vec![mem_ref.as_pop_token()]
                             } else {
                                 return Err(anyhow!(
                                     "instance field \"{}\" is not declared",
@@ -513,7 +543,7 @@ impl<'class> MethodDeclCompiler<'class> {
                             .module_compiler()
                             .get_static_field(left_identifier, field_name)
                         {
-                            mem_ref.as_pop_token()
+                            vec![mem_ref.as_pop_token()]
                         } else {
                             panic!("Not sure how to assign to {:?}.{:?}", left, right);
                         }
@@ -526,16 +556,21 @@ impl<'class> MethodDeclCompiler<'class> {
             }
             Term::Identifier(name) => {
                 if let Some(mem_ref) = self.local_names.get(name) {
-                    mem_ref.as_pop_token()
+                    vec![mem_ref.as_pop_token()]
                 } else {
                     return Err(anyhow!("variable \"{}\" has never been declared", name));
                 }
+            }
+            Term::Indexing(identifier_expr, index_expr) => {
+                let mut tokens = self.compile_indexing_pointer(identifier_expr, index_expr)?;
+                tokens.push(VMToken::Pop(VMSegment::That, 0));
+                tokens
             }
             _ => {
                 panic!("Don't know how to resolve term {:?}", dest_term)
             }
         };
-        tokens.push(pop_token);
+        tokens.append(&mut dest_tokens);
         Ok(tokens)
     }
 
@@ -625,8 +660,33 @@ impl<'class> MethodDeclCompiler<'class> {
             Term::Identifier(name) => self.compile_reference(name),
             Term::New(class_name, arguments) => self.compile_call(class_name, "new", arguments),
             Term::String(ascii) => self.compile_string_constant(ascii),
+            Term::Indexing(identifer_expr, index_expr) => {
+                self.compile_indexing_expr(identifer_expr, index_expr)
+            }
             _ => panic!("Don't know how to compile {:?}", term),
         }
+    }
+
+    fn compile_indexing_pointer(
+        &mut self,
+        identifier_expr: &Expression,
+        index_expr: &Expression,
+    ) -> Result<Vec<VMToken>> {
+        let mut tokens = self.compile_expression(index_expr)?;
+        tokens.extend(self.compile_expression(identifier_expr)?);
+        tokens.push(VMToken::Add);
+        tokens.push(VMToken::Pop(VMSegment::Pointer, 1));
+        Ok(tokens)
+    }
+
+    fn compile_indexing_expr(
+        &mut self,
+        identifier_expr: &Expression,
+        index_expr: &Expression,
+    ) -> Result<Vec<VMToken>> {
+        let mut tokens = self.compile_indexing_pointer(identifier_expr, index_expr)?;
+        tokens.push(VMToken::Push(VMSegment::That, 0));
+        Ok(tokens)
     }
 
     fn compile_string_constant(&mut self, ascii: &str) -> Result<Vec<VMToken>> {
@@ -837,6 +897,87 @@ mod tests {
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Sub,
                 VMToken::Return
+            ]
+        )
+    }
+
+    #[test]
+    fn test_array_assignment() {
+        let module = parse_module(
+            "
+            class Main {
+                static main(): void {
+                    let ram: number[] = 2048;
+                    ram[5] = 3;
+                }
+            }
+        ",
+        )
+        .unwrap();
+
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 1),
+                // set ram to point to 2048.
+                VMToken::Push(VMSegment::Constant, 2048),
+                VMToken::Pop(VMSegment::Local, 0),
+                // now execute:
+                //   ram[5] = 3
+                // which is the same as
+                //   *(ram+5) = 3
+                // step 1: calculate the right hand side of assignment
+                VMToken::Push(VMSegment::Constant, 3),
+                // step 2: calculate left hand side of assignment
+                // into THAT pointer
+                VMToken::Push(VMSegment::Constant, 5),
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Add,
+                VMToken::Pop(VMSegment::Pointer, 1),
+                // step 3: pop right hand side into THAT pointer
+                VMToken::Pop(VMSegment::That, 0),
+                // implicit return
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Return,
+            ]
+        )
+    }
+
+    #[test]
+    fn test_array_indexing() {
+        let module = parse_module(
+            "
+            class Main {
+                static main(): string {
+                    let ram: number[] = 0;
+                    return ram[5];
+                }
+            }
+        ",
+        )
+        .unwrap();
+
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Main.main".to_string(), 1),
+                // set ram to point to 0.
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Pop(VMSegment::Local, 0),
+                // now execute:
+                //   return ram[5]
+                // which is the same as
+                //   return *(ram+5)
+                VMToken::Push(VMSegment::Constant, 5),
+                VMToken::Push(VMSegment::Local, 0),
+                VMToken::Add,
+                // now deref
+                VMToken::Pop(VMSegment::Pointer, 1),
+                // now return
+                VMToken::Push(VMSegment::That, 0),
+                VMToken::Return,
             ]
         )
     }

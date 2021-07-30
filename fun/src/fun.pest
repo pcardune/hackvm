@@ -42,6 +42,7 @@ binary_operator = _{
 
 call_expr = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")"}
 new_expr = { "new" ~ call_expr }
+index_expr = { identifier ~ "[" ~ expr ~ "]"}
 term = {
   number
   | bool
@@ -49,6 +50,7 @@ term = {
   | array
   | new_expr
   | call_expr
+  | index_expr
   | identifier
   | ("(" ~ expr ~ ")")
 }

@@ -260,6 +260,7 @@ pub enum Term {
     BinaryOp(Op, Box<Term>, Box<Term>),
     Call(String, Vec<Expression>),
     New(String, Vec<Expression>),
+    Indexing(Box<Expression>, Box<Expression>),
 }
 
 impl Term {

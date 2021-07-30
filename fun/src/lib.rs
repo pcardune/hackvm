@@ -279,6 +279,25 @@ fn parse_new_expr(pair: Pair<Rule>) -> Result<Term> {
     }
 }
 
+fn parse_index_expr(pair: Pair<Rule>) -> Result<Term> {
+    assert!(pair.as_rule() == Rule::index_expr);
+    let mut pairs = pair.into_inner();
+    let identifier = pairs
+        .next()
+        .expect("index expr didn't start with identifier")
+        .as_str();
+    let expr = parse_expr(
+        pairs
+            .next()
+            .expect("index_expr didn't contain exprssion in brackets"),
+    )?;
+
+    Ok(Term::Indexing(
+        Box::new(Expression::new(Term::identifier(identifier))),
+        Box::new(expr),
+    ))
+}
+
 fn parse_call_expr(pair: Pair<Rule>) -> Result<Term> {
     assert!(pair.as_rule() == Rule::call_expr);
     let mut pairs = pair.into_inner();
@@ -324,6 +343,9 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
             }
             Rule::new_expr => {
                 return parse_new_expr(pair);
+            }
+            Rule::index_expr => {
+                return parse_index_expr(pair);
             }
             Rule::identifier => return Ok(Term::Identifier(pair.as_str().to_string())),
             _ => panic!(
@@ -573,6 +595,18 @@ mod tests {
                         Expression::new(Term::identifier("x")),
                         Expression::new(Term::identifier("y"))
                     ]
+                )
+            )
+        }
+
+        #[test]
+        fn test_array_indexing_expr() {
+            let expr = parse_expr_from_str("foo[3]");
+            assert_eq!(
+                expr.term(),
+                &Term::Indexing(
+                    Box::new(Expression::new(Term::identifier("foo"))),
+                    Box::new(Expression::new(Term::Number(3)))
                 )
             )
         }

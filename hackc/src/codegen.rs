@@ -329,6 +329,7 @@ hack_sys_init:
                 &format!("{}", num_statics * 8),
             )?;
         }
+        info!("Compiled {}", file.name);
     }
 
     output_file

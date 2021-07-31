@@ -1,3 +1,7 @@
+extern crate pretty_env_logger;
+#[macro_use]
+extern crate log;
+
 use anyhow::{anyhow, Context, Result};
 use clap::{App, Arg};
 use hackvm::{TokenizedFile, TokenizedProgram, VMToken};
@@ -78,6 +82,7 @@ impl FunFile for StaticFunFile {
     fn compile(&self) -> Result<FunFileBackedVMFile> {
         let vmcode = fun::compile(self.content)
             .with_context(|| format!("failed compiling {} to vmcode", self.filename))?;
+        info!("Compiled {}", self.filename);
         Ok(FunFileBackedVMFile {
             source: Box::new(*self),
             tokens: vmcode,
@@ -107,6 +112,7 @@ impl FunFile for FileBackedFunFile {
         let vmcode = fun::compile(&content).with_context(|| {
             format!("failed compiling {} to vmcode", self.path.to_string_lossy())
         })?;
+        info!("Compiled {}", self.path.to_string_lossy());
         Ok(FunFileBackedVMFile {
             source: Box::new(self.clone()),
             tokens: vmcode,
@@ -277,12 +283,13 @@ fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {
             .arg("-l")
             .arg(&list_out_path),
     ) {
-        println!("Well that didn't go well...");
+        error!("Failed assembling {}", asm_out_path.to_string_lossy());
         return Err(anyhow!(
             "Failed to assemble {}",
             asm_out_path.to_string_lossy()
         ));
     }
+    info!("Assembled {}", asm_out_path.to_string_lossy());
     return Ok(obj_out_path);
 }
 
@@ -315,13 +322,21 @@ impl Runtime {
             .arg(&runtime_obj_path);
 
         if !run("runtime", &mut command) {
-            println!("Well that didn't go well...");
+            error!(
+                "Failed compiling runtime {}",
+                self.cpp_file.to_string_lossy()
+            );
             return Err(anyhow!(
                 "Failed to compile runtime {} with command {:?}",
                 self.cpp_file.to_string_lossy(),
                 command
             ));
         }
+        info!(
+            "Compiled runtime {} to {}",
+            self.cpp_file.to_string_lossy(),
+            runtime_obj_path.to_string_lossy()
+        );
         return Ok(runtime_obj_path);
     }
 }
@@ -346,9 +361,13 @@ fn link_executable(
             .arg("-o")
             .arg(&executable_out_path),
     ) {
-        println!("Well that didn't go well...");
+        error!(
+            "Failed to link executable {}",
+            obj_out_path.to_string_lossy()
+        );
         return Err(anyhow!("Failed to link executable"));
     }
+    info!("Linked {}", executable_out_path.to_string_lossy());
     return Ok(executable_out_path);
 }
 
@@ -408,10 +427,11 @@ impl Executable {
                 fun_files
                     .iter()
                     .map(|fun_file| -> Result<(String, Box<dyn VMFile>)> {
-                        match fun_file.compile() {
+                        let result: Result<(String, Box<dyn VMFile>)> = match fun_file.compile() {
                             Ok(vmfile) => Ok((vmfile.file_name(), Box::new(vmfile))),
                             Err(e) => Err(e),
-                        }
+                        };
+                        result
                     })
                     .collect::<Result<HashMap<_, _>>>()?
             };
@@ -485,6 +505,9 @@ fn exec_vm(executable_path: &Path) -> Result<bool> {
 }
 
 fn main() {
+    pretty_env_logger::init();
+    info!("such information");
+
     let matches = App::new("hackc")
         .arg(
             Arg::with_name("input")

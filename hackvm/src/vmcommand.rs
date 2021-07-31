@@ -296,6 +296,15 @@ pub struct TokenizedProgram {
     pub files: Vec<TokenizedFile>,
 }
 
+impl From<Vec<TokenizedFile>> for TokenizedProgram {
+    fn from(files: Vec<TokenizedFile>) -> Self {
+        let mut program = TokenizedProgram::default();
+        let mut files = files;
+        program.append_tokenized_files(&mut files);
+        program
+    }
+}
+
 impl TokenizedProgram {
     pub fn from_files(files: &[(&str, &str)]) -> Result<TokenizedProgram, String> {
         let mut program = TokenizedProgram::default();

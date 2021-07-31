@@ -114,30 +114,25 @@ impl FunFile for FileBackedFunFile {
     }
 }
 
-struct FunFileBackedVMFile {
-    source: Box<dyn FunFile>,
-    tokens: Vec<VMToken>,
-}
+trait VMFile {
+    fn file_name(&self) -> String;
+    fn tokens(&self) -> &[VMToken];
 
-impl FunFileBackedVMFile {
-    pub fn file_name(&self) -> String {
-        let mut name = self.source.path().to_path_buf();
-        name.set_extension("vm");
-        name.file_name()
-            .expect("FunFile path should be a file")
-            .to_string_lossy()
-            .to_string()
+    fn to_tokenized_file(&self) -> Result<TokenizedFile> {
+        TokenizedFile::from_tokens(&self.file_name(), self.tokens()).map_err(|e| anyhow!("{}", e))
     }
 
-    pub fn tokens(&self) -> &[VMToken] {
-        &self.tokens
+    #[deprecated]
+    fn token_string(&self) -> String {
+        let mut out = String::new();
+        for token in self.tokens() {
+            out.push_str(&token.to_string());
+            out.push('\n');
+        }
+        out
     }
 
-    pub fn to_tokenized_file(&self) -> Result<TokenizedFile> {
-        TokenizedFile::from_tokens(&self.file_name(), &self.tokens).map_err(|e| anyhow!("{}", e))
-    }
-
-    pub fn write_to_dir(&self, output_dir: &Path) -> Result<()> {
+    fn write_to_dir(&self, output_dir: &Path) -> Result<()> {
         let mut output_path = output_dir.to_path_buf();
         output_path.push(self.file_name());
 
@@ -150,6 +145,78 @@ impl FunFileBackedVMFile {
                 .with_context(|| format!("Failed writing to {:?}", file))?;
         }
         Ok(())
+    }
+}
+
+struct FunFileBackedVMFile {
+    source: Box<dyn FunFile>,
+    tokens: Vec<VMToken>,
+}
+
+impl VMFile for FunFileBackedVMFile {
+    fn tokens(&self) -> &[VMToken] {
+        &self.tokens
+    }
+    fn file_name(&self) -> String {
+        let mut name = self.source.path().to_path_buf();
+        name.set_extension("vm");
+        name.file_name()
+            .expect("FunFile path should be a file")
+            .to_string_lossy()
+            .to_string()
+    }
+}
+
+struct FileBackedVMFile {
+    path: PathBuf,
+    tokens: Vec<VMToken>,
+}
+
+impl FileBackedVMFile {
+    pub fn new(path: &Path) -> Result<FileBackedVMFile> {
+        let content =
+            fs::read_to_string(path).with_context(|| anyhow!("Failed to read file {:?}", path))?;
+        let tokens = hackvm::parse_vmcode(&content).map_err(|e| anyhow!("{}", e))?;
+        Ok(FileBackedVMFile {
+            path: path.to_path_buf(),
+            tokens,
+        })
+    }
+}
+
+impl VMFile for FileBackedVMFile {
+    fn file_name(&self) -> String {
+        self.path
+            .file_name()
+            .expect("FileBackedVMFile should have been created with an actual file path")
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn tokens(&self) -> &[VMToken] {
+        &self.tokens
+    }
+}
+
+struct StaticVMFile {
+    file_name: &'static str,
+    tokens: Vec<VMToken>,
+}
+
+impl StaticVMFile {
+    pub fn new(file_name: &'static str, content: &'static str) -> Result<StaticVMFile> {
+        let tokens = hackvm::parse_vmcode(content).map_err(|e| anyhow!("{}", e))?;
+        Ok(StaticVMFile { file_name, tokens })
+    }
+}
+
+impl VMFile for StaticVMFile {
+    fn file_name(&self) -> String {
+        self.file_name.to_string()
+    }
+
+    fn tokens(&self) -> &[VMToken] {
+        &self.tokens
     }
 }
 
@@ -190,47 +257,6 @@ impl CompilerInput {
             .collect::<Vec<_>>();
         Ok(filtered)
     }
-}
-
-fn get_tokenized_program(
-    paths: &[std::path::PathBuf],
-    include_os: bool,
-) -> Result<TokenizedProgram> {
-    let mut files: HashMap<String, String> = HashMap::new();
-
-    for path in paths.iter() {
-        let file_name = path
-            .file_name()
-            .expect("paths to be filtered for proper files already")
-            .to_string_lossy()
-            .to_string();
-        let file_content = fs::read_to_string(path).with_context(|| "Failed to read file")?;
-        files.insert(file_name, file_content);
-    }
-
-    #[rustfmt::skip]
-    let os_files = vec![
-        ("Array.vm",    std::include_str!("../examples/vmcode/OS/Array.vm")),
-        ("Keyboard.vm", std::include_str!("../examples/vmcode/OS/Keyboard.vm")),
-        ("Math.vm",     std::include_str!("../examples/vmcode/OS/Math.vm")),
-        ("Memory.vm",   std::include_str!("../examples/vmcode/OS/Memory.vm")),
-        ("Output.vm",   std::include_str!("../examples/vmcode/OS/Output.vm")),
-        ("Screen.vm",   std::include_str!("../examples/vmcode/OS/Screen.vm")),
-        ("String.vm",   std::include_str!("../examples/vmcode/OS/String.vm")),
-        ("Sys.vm",      std::include_str!("../examples/vmcode/OS/Sys.vm")),
-    ];
-    if include_os {
-        for os_file in os_files {
-            if !files.contains_key(os_file.0) {
-                files.insert(os_file.0.to_string(), os_file.1.to_string());
-            }
-        }
-    }
-    let file_refs = files
-        .iter()
-        .map(|f| (f.0.as_str(), f.1.as_str()))
-        .collect::<Vec<_>>();
-    TokenizedProgram::from_files(&file_refs).map_err(|e| anyhow::format_err!(e))
 }
 
 fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {
@@ -356,60 +382,90 @@ impl Executable {
     }
 
     fn compile(&self) -> Result<PathBuf> {
-        let fun_file_paths = self.compiler_input.get_files(FileType::FUN)?;
-        let mut fun_files = fun_file_paths
-            .iter()
-            .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
-            .collect::<Vec<_>>();
-
-        if fun_file_paths.len() > 0 && self.include_os {
-            #[rustfmt::skip]
-            let os_files = vec![
-                ("Sys.fun", std::include_str!("../examples/funcode/OS/Sys.fun")),
-                ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun"))
-            ];
-
-            fun_files.extend(
-                os_files
+        // compile vmfiles from funcode
+        let mut vmfiles =
+            {
+                let fun_file_paths = self.compiler_input.get_files(FileType::FUN)?;
+                let mut fun_files = fun_file_paths
                     .iter()
-                    .map(|(filename, content)| -> Box<dyn FunFile> {
-                        Box::new(StaticFunFile::new(filename, content))
-                    }),
-            );
+                    .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
+                    .collect::<Vec<_>>();
+
+                if fun_file_paths.len() > 0 && self.include_os {
+                    #[rustfmt::skip]
+                    let os_files = vec![
+                        ("Sys.fun", std::include_str!("../examples/funcode/OS/Sys.fun")),
+                        ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun"))
+                    ];
+
+                    fun_files.extend(os_files.iter().map(
+                        |(filename, content)| -> Box<dyn FunFile> {
+                            Box::new(StaticFunFile::new(filename, content))
+                        },
+                    ));
+                }
+
+                fun_files
+                    .iter()
+                    .map(|fun_file| -> Result<(String, Box<dyn VMFile>)> {
+                        match fun_file.compile() {
+                            Ok(vmfile) => Ok((vmfile.file_name(), Box::new(vmfile))),
+                            Err(e) => Err(e),
+                        }
+                    })
+                    .collect::<Result<HashMap<_, _>>>()?
+            };
+
+        // Load additional vmfiles from disk or memory
+        {
+            // add whatever additional vmfiles there are in that directory
+            // if they aren't superseded by funcode files
+            for path in self.compiler_input.get_files(FileType::VM)? {
+                let vmfile = FileBackedVMFile::new(&path)?;
+                let key = vmfile.file_name();
+                if !vmfiles.contains_key(&key) {
+                    vmfiles.insert(key, Box::new(vmfile));
+                }
+            }
+
+            // add vm os files that might be missing
+            if self.include_os {
+                #[rustfmt::skip]
+            let os_files = vec![
+                StaticVMFile::new("Array.vm",    std::include_str!("../examples/vmcode/OS/Array.vm"))?,
+                StaticVMFile::new("Keyboard.vm", std::include_str!("../examples/vmcode/OS/Keyboard.vm"))?,
+                StaticVMFile::new("Math.vm",     std::include_str!("../examples/vmcode/OS/Math.vm"))?,
+                StaticVMFile::new("Memory.vm",   std::include_str!("../examples/vmcode/OS/Memory.vm"))?,
+                StaticVMFile::new("Output.vm",   std::include_str!("../examples/vmcode/OS/Output.vm"))?,
+                StaticVMFile::new("Screen.vm",   std::include_str!("../examples/vmcode/OS/Screen.vm"))?,
+                StaticVMFile::new("String.vm",   std::include_str!("../examples/vmcode/OS/String.vm"))?,
+                StaticVMFile::new("Sys.vm",      std::include_str!("../examples/vmcode/OS/Sys.vm"))?,
+            ];
+                for os_file in os_files {
+                    if !vmfiles.contains_key(&os_file.file_name()) {
+                        vmfiles.insert(os_file.file_name(), Box::new(os_file));
+                    }
+                }
+            }
         }
 
-        let vmfiles = fun_files
-            .iter()
-            .map(|fun_file| fun_file.compile())
-            .collect::<Result<Vec<_>>>()?;
-
+        // write all the vmfiles to the output directory
         if self.output_vmfiles {
             let mut out_dir = self.out_dir.clone();
             out_dir.push("vmcode");
             fs::create_dir_all(&out_dir)
                 .with_context(|| format!("Failed creating directory {:?}", out_dir))?;
-            for vmfile in vmfiles.iter() {
+            for vmfile in vmfiles.values() {
                 vmfile.write_to_dir(&out_dir)?;
             }
         }
 
-        let vmfiles = vmfiles
-            .iter()
+        let tokenized_files = vmfiles
+            .into_values()
             .map(|e| e.to_tokenized_file())
             .collect::<Result<Vec<_>>>()?;
 
-        let mut tokenized_program = get_tokenized_program(
-            &self.compiler_input.get_files(FileType::VM)?,
-            self.include_os,
-        )
-        .with_context(|| {
-            format!(
-                "Failed tokenizing program {}",
-                self.compiler_input.path.to_string_lossy()
-            )
-        })?;
-
-        tokenized_program.replace_files(vmfiles);
+        let tokenized_program = TokenizedProgram::from(tokenized_files);
 
         let asm_out_path = self.out_dir.join("out.asm");
         compile_vm_to_asm(&tokenized_program, &asm_out_path)

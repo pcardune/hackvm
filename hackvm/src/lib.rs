@@ -17,6 +17,7 @@ pub use vmcommand::{
     TokenizedProgram, VMProgram,
 };
 pub use vmemulator::{EmulatorRAM as VMEmulatorRAM, VMEmulator};
+pub use vmparser::parse_lines as parse_vmcode;
 pub use vmparser::Token as VMToken;
 
 #[wasm_bindgen]

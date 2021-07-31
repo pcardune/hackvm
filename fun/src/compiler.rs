@@ -392,6 +392,7 @@ pub struct MethodDeclCompiler<'class> {
     class_compiler: &'class ClassDeclCompiler<'class>,
     method: &'class MethodDecl,
     local_names: Namespace,
+    while_count: usize,
 }
 impl<'class> MethodDeclCompiler<'class> {
     fn new(
@@ -402,6 +403,7 @@ impl<'class> MethodDeclCompiler<'class> {
             class_compiler,
             method,
             local_names: Namespace::default(),
+            while_count: 0,
         }
     }
 
@@ -601,8 +603,9 @@ impl<'class> MethodDeclCompiler<'class> {
         &mut self,
         while_statement: &WhileStatement,
     ) -> Result<Vec<VMToken>> {
-        let start_label = "WHILE".to_string();
-        let end_label = "WHILE_END".to_string();
+        let start_label = format!("WHILE_{}", self.while_count);
+        self.while_count += 1;
+        let end_label = format!("{}_END", start_label);
         let mut tokens = vec![VMToken::Label(start_label.clone())];
         tokens.append(&mut self.compile_expression(while_statement.condition_expr())?);
         tokens.push(VMToken::Not);
@@ -877,6 +880,8 @@ impl<'class> MethodDeclCompiler<'class> {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::min;
+
     use super::module::*;
     use super::*;
     use crate::parse_module;
@@ -1405,6 +1410,25 @@ mod tests {
         );
     }
 
+    fn assert_array_eq<T>(left: &[T], right: &[T])
+    where
+        T: std::fmt::Debug + std::fmt::Display + PartialEq,
+    {
+        use std::fmt::Write;
+        let mut msg = String::new();
+
+        for i in 0..min(left.len(), right.len()) {
+            let marker = if left[i] != right[i] { "x" } else { " " };
+            let leftstr = format!("{:?}", left[i]);
+            let rightstr = format!("{:?}", right[i]);
+            writeln!(msg, "  {} {:3}: {:.<20} | {}", marker, i, leftstr, rightstr).unwrap();
+        }
+        if left.len() != right.len() {
+            writeln!(msg, "  x  there's more...").unwrap();
+        }
+        assert_eq!(left, right, "\n\n{}", msg);
+    }
+
     #[test]
     fn test_loop() {
         let module = parse_module(
@@ -1412,10 +1436,15 @@ mod tests {
             class Main {
                 static main(): number {
                     let i: number = 0;
+                    let j: number = 0;
                     let sum: number = 0;
                     while (i < 10) {
                         i = i + 1;
-                        sum = sum + sum;
+                        j = 0;
+                        while (j < 10) {
+                            j = j + 1;
+                            sum = sum + sum;
+                        }
                     }
                     return sum;
                 }
@@ -1425,33 +1454,59 @@ mod tests {
         .unwrap();
 
         let vmcode = ModuleCompiler::new(&module).compile().unwrap();
-        assert_eq!(
+        assert_array_eq(
             &vmcode,
             &[
-                VMToken::Function("Main.main".to_string(), 2),
+                VMToken::Function("Main.main".to_string(), 3),
                 VMToken::Push(VMSegment::Constant, 0),
                 VMToken::Pop(VMSegment::Local, 0),
                 VMToken::Push(VMSegment::Constant, 0),
                 VMToken::Pop(VMSegment::Local, 1),
-                VMToken::Label("WHILE".to_string()),
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Pop(VMSegment::Local, 2),
+                VMToken::Label("WHILE_0".to_string()),
                 VMToken::Push(VMSegment::Local, 0),
                 VMToken::Push(VMSegment::Constant, 10),
                 VMToken::Lt,
                 VMToken::Not,
-                VMToken::If("WHILE_END".to_string()),
+                VMToken::If("WHILE_0_END".to_string()),
+                // <outer while>
+                //   i = i + 1;
                 VMToken::Push(VMSegment::Local, 0),
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Add,
                 VMToken::Pop(VMSegment::Local, 0),
+                //   j = 0;
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Pop(VMSegment::Local, 1),
+                //   while (j < 10) {
+                VMToken::Label("WHILE_1".to_string()),
                 VMToken::Push(VMSegment::Local, 1),
+                VMToken::Push(VMSegment::Constant, 10),
+                VMToken::Lt,
+                VMToken::Not,
+                VMToken::If("WHILE_1_END".to_string()),
+                //     j = j + 1
                 VMToken::Push(VMSegment::Local, 1),
+                VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Add,
                 VMToken::Pop(VMSegment::Local, 1),
-                VMToken::Goto("WHILE".to_string()),
-                VMToken::Label("WHILE_END".to_string()),
-                VMToken::Push(VMSegment::Local, 1),
-                VMToken::Return
-            ]
+                //     sum = sum + sum
+                VMToken::Push(VMSegment::Local, 2),
+                VMToken::Push(VMSegment::Local, 2),
+                VMToken::Add,
+                VMToken::Pop(VMSegment::Local, 2),
+                //   }
+                VMToken::Goto("WHILE_1".to_string()),
+                VMToken::Label("WHILE_1_END".to_string()),
+                //   </inner while>
+                // </outer while>
+                VMToken::Goto("WHILE_0".to_string()),
+                VMToken::Label("WHILE_0_END".to_string()),
+                // return sum;
+                VMToken::Push(VMSegment::Local, 2),
+                VMToken::Return,
+            ],
         )
     }
 }

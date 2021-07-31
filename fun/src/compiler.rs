@@ -656,6 +656,10 @@ impl<'class> MethodDeclCompiler<'class> {
 
     fn compile_term(&mut self, term: &Term) -> Result<Vec<VMToken>> {
         match term {
+            Term::Bool(bool) => match bool {
+                false => Ok(vec![VMToken::Push(VMSegment::Constant, 0)]),
+                true => Ok(vec![VMToken::Push(VMSegment::Constant, 0xffff)]),
+            },
             Term::Number(num) => return Ok(vec![VMToken::Push(VMSegment::Constant, *num as u16)]),
             Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
             Term::Identifier(name) => self.compile_reference(name),
@@ -857,6 +861,9 @@ impl<'class> MethodDeclCompiler<'class> {
             Op::Gt => VMToken::Gt,
             Op::Eq => VMToken::Eq,
             Op::Multiply => VMToken::Call("Math.multiply".to_string(), 2),
+            Op::Divide => VMToken::Call("Math.divide".to_string(), 2),
+            Op::And => VMToken::And,
+            Op::Or => VMToken::Or,
             _ => todo!("Don't know how to handle op {:?}", op),
         };
         tokens.push(op_token);
@@ -1069,6 +1076,56 @@ mod tests {
                 VMToken::Push(VMSegment::Argument, 0),
                 VMToken::Push(VMSegment::Argument, 1),
                 VMToken::Add,
+                VMToken::Return
+            ]
+        );
+    }
+
+    #[test]
+    fn test_binary_operators() {
+        let module = parse_module(
+            "
+            class Foo {
+                static foo():boolean  {
+                    let a:number = false || true;
+                    let b:number = 1+2*3/5;
+                    return 0 < 1 && 1 > 0 || 3 > 4;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_eq!(
+            &vmcode,
+            &[
+                VMToken::Function("Foo.foo".to_string(), 2),
+                // let a = ...
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Push(VMSegment::Constant, 65535),
+                VMToken::Or,
+                VMToken::Pop(VMSegment::Local, 0),
+                // let b = ...
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Push(VMSegment::Constant, 2),
+                VMToken::Push(VMSegment::Constant, 3),
+                VMToken::Call("Math.multiply".to_string(), 2),
+                VMToken::Push(VMSegment::Constant, 5),
+                VMToken::Call("Math.divide".to_string(), 2),
+                VMToken::Add,
+                VMToken::Pop(VMSegment::Local, 1),
+                // return ...
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Lt,
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Gt,
+                VMToken::And,
+                VMToken::Push(VMSegment::Constant, 3),
+                VMToken::Push(VMSegment::Constant, 4),
+                VMToken::Gt,
+                VMToken::Or,
                 VMToken::Return
             ]
         );

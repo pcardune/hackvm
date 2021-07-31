@@ -1,7 +1,7 @@
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 mod ast;
 mod compiler;
@@ -23,13 +23,15 @@ use pest::{
 use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatement};
 
 pub fn compile(input: &str) -> Result<Vec<VMToken>> {
-    let module = parse_module(input)?;
+    let module =
+        parse_module(input).with_context(|| anyhow!("fun::compile: parse_module failed"))?;
     ModuleCompiler::new(&module).compile()
 }
 
 pub fn parse_module(input: &str) -> Result<Module> {
     let mut classes = vec![];
-    let pairs = FUNParser::parse(Rule::file, input)?;
+    let pairs = FUNParser::parse(Rule::file, input)
+        .with_context(|| anyhow!("fun::parse_module: failed tokenizing to pairs"))?;
     for pair in pairs {
         match pair.as_rule() {
             Rule::file => {
@@ -227,6 +229,7 @@ fn parse_if_statement(pair: Pair<Rule>) -> Result<IfStatement> {
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     let climber: PrecClimber<Rule> = PrecClimber::new(vec![
+        Operator::new(Rule::or, Assoc::Left) | Operator::new(Rule::and, Assoc::Left),
         Operator::new(Rule::cmp_lte, Assoc::Left) | {
             Operator::new(Rule::cmp_lt, Assoc::Left)
                 | Operator::new(Rule::cmp_gte, Assoc::Left)
@@ -253,6 +256,8 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
             Rule::cmp_eq => Op::Eq,
             Rule::cmp_ne => Op::Ne,
             Rule::dot => Op::Dot,
+            Rule::and => Op::And,
+            Rule::or => Op::Or,
             other => panic!("Unrecognized operator {:?}", other),
         };
         Term::binary_op(op, left, right)
@@ -314,7 +319,11 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::number => {
-                let num = pair.as_str().parse::<u64>().unwrap();
+                let num = pair
+                    .as_str()
+                    .parse::<u64>()
+                    .with_context(|| anyhow!("failed parsing number {:?}", pair.as_str()))
+                    .unwrap();
                 return Ok(Term::Number(num));
             }
             Rule::bool => {

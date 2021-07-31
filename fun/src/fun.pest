@@ -3,7 +3,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 identifier = @{(ASCII_ALPHA | "_")+ ~ ASCII_ALPHANUMERIC*}
 
 bool = { "true" | "false" }
-number = { ASCII_DIGIT+ }
+number = @{ ASCII_DIGIT+ }
 string = @{ 
   ("\"" ~ (!"\"" ~ ANY)* ~ "\"")
   | ("'" ~ (!"'" ~ ANY)* ~ "'")
@@ -14,6 +14,8 @@ unary_operator = {
   "!"
   | "~"
 }
+or = { "||" }
+and = { "&&" }
 dot = { "." }
 plus = { "+" }
 sub = { "-" }
@@ -32,6 +34,8 @@ binary_operator = _{
   | sub
   | multiply
   | divide
+  | and
+  | or
   | cmp_lte
   | cmp_lt
   | cmp_gte

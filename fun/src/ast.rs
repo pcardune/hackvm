@@ -247,6 +247,8 @@ pub enum Op {
     Gte,
     Eq,
     Ne,
+    And,
+    Or,
     Dot,
 }
 

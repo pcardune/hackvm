@@ -1,2 +1,9 @@
 [workspace]
 members = ["hackvm", "hackc", "fun"]
+
+[profile.bench]
+debug = true
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"

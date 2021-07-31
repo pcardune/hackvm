@@ -151,6 +151,7 @@ mod types {
         pub fn get_mut(&mut self, name: &str) -> Option<&mut ObjectType> {
             self.types.get_mut(name)
         }
+        #[allow(dead_code)]
         pub fn get(&self, name: &str) -> Option<&ObjectType> {
             self.types.get(name)
         }

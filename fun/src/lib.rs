@@ -63,7 +63,6 @@ impl Node<ClassDecl> {
     }
 
     fn from_pair(pair: Pair<Rule>) -> Result<Node<ClassDecl>> {
-        let span = pair.as_span();
         let mut pairs = pair.into_inner();
         let name = pairs
             .next()
@@ -112,7 +111,6 @@ impl Node<ClassDecl> {
 }
 
 fn parse_field_decl<'a>(pair: Pair<'a, Rule>, scope: Scope) -> Result<Node<FieldDecl>> {
-    let span = pair.as_span();
     let typed_identifier = pair.into_inner().next().expect("no typed identifier...");
     let (name, type_name) = parse_typed_identifier(typed_identifier)?;
     Ok(Node::new(FieldDecl::new(scope, name, type_name)))

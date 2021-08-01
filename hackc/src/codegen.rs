@@ -237,7 +237,11 @@ impl DataSection {
     }
 }
 
-pub fn compile_vm_to_asm(program: &TokenizedProgram, output_path: &Path) -> Result<()> {
+pub fn compile_vm_to_asm(
+    program: &TokenizedProgram,
+    runtime_hook: bool,
+    output_path: &Path,
+) -> Result<()> {
     let mut output_file = fs::File::create(output_path).with_context(|| {
         format!(
             "Failed to create output file {}",
@@ -249,19 +253,34 @@ pub fn compile_vm_to_asm(program: &TokenizedProgram, output_path: &Path) -> Resu
     data_section.insert("SYS_exit", "equ", "60")?;
     let mut bss_section = DataSection::new("bss");
     bss_section.insert("RAM", "resq", &format!("{}", (16384 + 8192 + 1) * 8))?;
-    let preamble = "
-section .text
 
-; Arguments Passed:
-;     1) rdi - address of memory block
-; Returns: VOID
-global hack_sys_init
-hack_sys_init:
-    mov dword [rdi], 53
-    mov dword [rdi], RAM
-    call sys.init
-    ret
-    \n";
+    let entry = if runtime_hook {
+        "
+        ; Arguments Passed:
+        ;     1) rdi - address of memory block
+        ; Returns: VOID
+        global hack_sys_init
+        hack_sys_init:
+            mov dword [rdi], 53
+            mov dword [rdi], RAM
+            call sys.init
+            ret
+            \n"
+    } else {
+        "
+        global main
+        main:
+            call sys.init
+            ret
+        \n"
+    };
+
+    let preamble = format!(
+        "
+        section .text
+        {}\n",
+        entry
+    );
     let indent = |lines: String| -> String {
         lines
             .lines()

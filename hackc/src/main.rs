@@ -348,29 +348,30 @@ impl Runtime {
     }
 }
 
-fn link_executable(
-    out_dir: &Path,
-    runtime_obj_path: &Path,
-    obj_out_path: &Path,
-) -> Result<PathBuf> {
+fn link_executable(out_dir: &Path, obj_paths: &[PathBuf]) -> Result<PathBuf> {
     let executable_out_path = out_dir.join("out");
 
-    if !run(
-        "link",
-        process::Command::new("g++")
-            .arg(&runtime_obj_path)
-            .arg(&obj_out_path)
-            .arg("-std=c++11")
-            .arg("-pthread")
-            .arg("-g")
-            .arg("-no-pie")
-            .arg("-lSDL2")
-            .arg("-o")
-            .arg(&executable_out_path),
-    ) {
+    let mut command = process::Command::new("g++");
+    for path in obj_paths {
+        command.arg(path);
+    }
+    command
+        .arg("-std=c++11")
+        .arg("-pthread")
+        .arg("-g")
+        .arg("-no-pie")
+        .arg("-lSDL2")
+        .arg("-o")
+        .arg(&executable_out_path);
+
+    if !run("link", &mut command) {
         error!(
-            "Failed to link executable {}",
-            obj_out_path.to_string_lossy()
+            "Failed to link executable from {}",
+            obj_paths
+                .iter()
+                .map(|p| p.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(", ") // obj_out_path.to_string_lossy()
         );
         return Err(anyhow!("Failed to link executable"));
     }
@@ -381,7 +382,7 @@ fn link_executable(
 struct Executable {
     compiler_input: CompilerInput,
     out_dir: PathBuf,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
     include_os: bool,
     output_vmfiles: bool,
 }
@@ -391,13 +392,13 @@ impl Executable {
         Executable {
             compiler_input: CompilerInput::new(input_path.to_path_buf()),
             out_dir: out_dir.to_path_buf(),
-            runtime: Runtime::default(),
+            runtime: Some(Runtime::default()),
             include_os: false,
             output_vmfiles: true,
         }
     }
 
-    fn runtime(mut self, runtime: Runtime) -> Executable {
+    fn runtime(mut self, runtime: Option<Runtime>) -> Executable {
         self.runtime = runtime;
         self
     }
@@ -417,11 +418,13 @@ impl Executable {
                     .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
                     .collect::<Vec<_>>();
 
-                if fun_file_paths.len() > 0 && self.include_os {
+                if self.include_os {
                     #[rustfmt::skip]
                     let os_files = vec![
                         ("Sys.fun", std::include_str!("../examples/funcode/OS/Sys.fun")),
-                        ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun"))
+                        ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun")),
+                        // ("Keyboard.fun", std::include_str!("../examples/funcode/OS/Keyboard.fun")),
+                        // ("Screen.fun", std::include_str!("../examples/funcode/OS/Screen.fun")),
                     ];
 
                     fun_files.extend(os_files.iter().map(
@@ -495,13 +498,16 @@ impl Executable {
         let tokenized_program = TokenizedProgram::from(tokenized_files);
 
         let asm_out_path = self.out_dir.join("out.asm");
-        compile_vm_to_asm(&tokenized_program, &asm_out_path)
+        compile_vm_to_asm(&tokenized_program, self.runtime.is_some(), &asm_out_path)
             .with_context(|| "Failed compiling vmcode to asm")?;
 
         let obj_out_path = assemble(&self.out_dir, &asm_out_path)?;
-        let runtime_obj_path = self.runtime.compile(&self.out_dir)?;
+        let mut obj_paths = vec![obj_out_path];
+        if let Some(runtime) = &self.runtime {
+            obj_paths.push(runtime.compile(&self.out_dir)?);
+        }
 
-        return link_executable(&self.out_dir, &runtime_obj_path, &obj_out_path);
+        return link_executable(&self.out_dir, &obj_paths);
     }
 }
 
@@ -534,9 +540,10 @@ fn main() {
     let input_file_path = matches.value_of("input").unwrap();
     let out_dir = Path::new("out");
 
-    let runtime: Runtime = match matches.value_of("runtime") {
-        Some("default") => Runtime::default(),
-        Some("debug") => Runtime::debug(),
+    let runtime: Option<Runtime> = match matches.value_of("runtime") {
+        Some("default") => Some(Runtime::default()),
+        Some("debug") => Some(Runtime::debug()),
+        Some("none") => None,
         Some(other) => {
             println!("Invalid runtime \"{}\"", other);
             return;
@@ -683,7 +690,7 @@ mod tests {
                     .with_context(|| "Failed writing vmcode to disk")?;
             }
             let executable_path = Executable::new(&program_dir, &out_dir)
-                .runtime(Runtime::debug())
+                .runtime(Some(Runtime::debug()))
                 .compile()
                 .with_context(|| {
                     format!(

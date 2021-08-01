@@ -394,6 +394,7 @@ pub struct MethodDeclCompiler<'class> {
     method: &'class MethodDecl,
     local_names: Namespace,
     while_count: usize,
+    if_count: usize,
 }
 impl<'class> MethodDeclCompiler<'class> {
     fn new(
@@ -405,6 +406,7 @@ impl<'class> MethodDeclCompiler<'class> {
             method,
             local_names: Namespace::default(),
             while_count: 0,
+            if_count: 0,
         }
     }
 
@@ -579,8 +581,9 @@ impl<'class> MethodDeclCompiler<'class> {
     }
 
     fn compile_if_statement(&mut self, if_statement: &IfStatement) -> Result<Vec<VMToken>> {
-        let end_label = "IF_END".to_string();
-        let else_end_label = "IF_ELSE_END".to_string();
+        let end_label = format!("IF_{}_END", self.if_count);
+        let else_end_label = format!("IF_{}_ELSE_END", self.if_count);
+        self.if_count += 1;
 
         // condition check
         let mut tokens = self.compile_expression(if_statement.condition_expr())?;
@@ -1461,6 +1464,9 @@ mod tests {
                         a = a+1;
                     } else {
                         a = a-1;
+                        if (true) {
+                            a = 5;
+                        }
                     }
                     return a;
                 }
@@ -1470,7 +1476,7 @@ mod tests {
         .unwrap();
 
         let vmcode = ModuleCompiler::new(&module).compile().unwrap();
-        assert_eq!(
+        assert_array_eq(
             &vmcode,
             &[
                 VMToken::Function("Main.main".to_string(), 1),
@@ -1481,24 +1487,32 @@ mod tests {
                 VMToken::Push(VMSegment::Constant, 10),
                 VMToken::Lt,
                 VMToken::Not,
-                VMToken::If("IF_END".to_string()),
+                VMToken::If("IF_0_END".to_string()),
                 // true block
                 VMToken::Push(VMSegment::Local, 0),
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Add,
                 VMToken::Pop(VMSegment::Local, 0),
-                VMToken::Goto("IF_ELSE_END".to_string()),
+                VMToken::Goto("IF_0_ELSE_END".to_string()),
                 // false block
-                VMToken::Label("IF_END".to_string()),
+                VMToken::Label("IF_0_END".to_string()),
                 VMToken::Push(VMSegment::Local, 0),
                 VMToken::Push(VMSegment::Constant, 1),
                 VMToken::Sub,
                 VMToken::Pop(VMSegment::Local, 0),
-                VMToken::Label("IF_ELSE_END".to_string()),
+                // inner if condition
+                VMToken::Push(VMSegment::Constant, 0xffff),
+                VMToken::Not,
+                VMToken::If("IF_1_END".to_string()),
+                VMToken::Push(VMSegment::Constant, 5),
+                VMToken::Pop(VMSegment::Local, 0),
+                VMToken::Label("IF_1_END".to_string()),
+                // end inner if condition
+                VMToken::Label("IF_0_ELSE_END".to_string()),
                 // return
                 VMToken::Push(VMSegment::Local, 0),
-                VMToken::Return
-            ]
+                VMToken::Return,
+            ],
         );
     }
 

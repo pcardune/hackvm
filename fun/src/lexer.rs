@@ -89,6 +89,11 @@ mod tests {
             "a == b", "a != b", "a & b", "a | b", "!a", "~a",
         ];
         assert_all_good(Rule::expr, &good);
+
+        let good_arrays = vec!["[]", "[1,2,3]", "[a,b,c,]"];
+        assert_all_good(Rule::expr, &good_arrays);
+        let bad_arrays = vec!["[1,,]"];
+        assert_all_bad(Rule::expr, &bad_arrays);
     }
 
     #[test]

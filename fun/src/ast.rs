@@ -254,6 +254,13 @@ pub enum Op {
     Dot,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+    BitNot,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Term {
     Number(u64),
@@ -267,9 +274,13 @@ pub enum Term {
     Expr(Box<Expression>),
 
     BinaryOp(Op, Box<Term>, Box<Term>),
+    UnaryOp(UnaryOp, Box<Term>),
 }
 
 impl Term {
+    pub fn unary_op(op: UnaryOp, operand: Term) -> Term {
+        Term::UnaryOp(op, Box::from(operand))
+    }
     pub fn binary_op(op: Op, left: Term, right: Term) -> Term {
         Term::BinaryOp(op, Box::from(left), Box::from(right))
     }

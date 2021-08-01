@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::usize;
 
 use crate::ast::{
-    AssignmentStatement, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, WhileStatement,
+    AssignmentStatement, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, UnaryOp,
+    WhileStatement,
 };
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
 use anyhow::Result;
@@ -665,6 +666,7 @@ impl<'class> MethodDeclCompiler<'class> {
             },
             Term::Number(num) => return Ok(vec![VMToken::Push(VMSegment::Constant, *num as u16)]),
             Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
+            Term::UnaryOp(op, operand) => self.compile_unary_op(op, operand),
             Term::Identifier(name) => self.compile_reference(name),
             Term::New(class_name, arguments) => self.compile_call(class_name, "new", arguments),
             Term::String(ascii) => self.compile_string_constant(ascii),
@@ -879,6 +881,15 @@ impl<'class> MethodDeclCompiler<'class> {
                 panic!("Not sure how to resolve {:?} dot {:?}", left, right);
             }
         }
+    }
+
+    fn compile_unary_op(&mut self, op: &UnaryOp, operand: &Term) -> Result<Vec<VMToken>> {
+        let mut tokens = self.compile_term(operand)?;
+        tokens.push(match op {
+            UnaryOp::BitNot | UnaryOp::Not => VMToken::Not,
+            UnaryOp::Neg => VMToken::Neg,
+        });
+        Ok(tokens)
     }
 
     fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
@@ -1115,6 +1126,47 @@ mod tests {
                 VMToken::Add,
                 VMToken::Return
             ]
+        );
+    }
+
+    #[test]
+    fn test_unary_operators() {
+        let module = parse_module(
+            "
+            class Foo {
+                static bit_not():number  {
+                    return ~1;
+                }
+                static not(): boolean {
+                    return !false;
+                }
+                static neg(): number {
+                    return -10;
+                }
+            }
+        ",
+        )
+        .unwrap();
+        let vmcode = ModuleCompiler::new(&module).compile().unwrap();
+        assert_array_eq(
+            &vmcode,
+            &[
+                // bitwise not operator
+                VMToken::Function("Foo.bit_not".to_string(), 0),
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Not,
+                VMToken::Return,
+                // not operator
+                VMToken::Function("Foo.not".to_string(), 0),
+                VMToken::Push(VMSegment::Constant, 0),
+                VMToken::Not,
+                VMToken::Return,
+                // negate operator
+                VMToken::Function("Foo.neg".to_string(), 0),
+                VMToken::Push(VMSegment::Constant, 10),
+                VMToken::Neg,
+                VMToken::Return,
+            ],
         );
     }
 

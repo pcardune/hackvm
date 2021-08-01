@@ -9,7 +9,7 @@ mod parser;
 
 use ast::{
     AssignmentStatement, Block, ClassDecl, Expression, IfStatement, Module, Node, Parameter, Scope,
-    Term,
+    Term, UnaryOp,
 };
 use compiler::ModuleCompiler;
 use hackvm::VMToken;
@@ -228,49 +228,71 @@ fn parse_if_statement(pair: Pair<Rule>) -> Result<IfStatement> {
 }
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
-    let climber: PrecClimber<Rule> = PrecClimber::new(vec![
-        // boolean operators
-        Operator::new(Rule::or, Assoc::Left) | Operator::new(Rule::and, Assoc::Left),
-        Operator::new(Rule::cmp_lte, Assoc::Left) | {
-            Operator::new(Rule::cmp_lt, Assoc::Left)
-                | Operator::new(Rule::cmp_gte, Assoc::Left)
-                | Operator::new(Rule::cmp_gt, Assoc::Left)
-                | Operator::new(Rule::cmp_ne, Assoc::Left)
-                | Operator::new(Rule::cmp_eq, Assoc::Left)
-        },
-        // arithmetic operators
-        Operator::new(Rule::bit_or, Assoc::Left) | Operator::new(Rule::bit_and, Assoc::Left),
-        Operator::new(Rule::plus, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
-        Operator::new(Rule::multiply, Assoc::Left) | Operator::new(Rule::divide, Assoc::Left),
-        // dot operator...
-        Operator::new(Rule::dot, Assoc::Left),
-    ]);
+    let mut pairs = pair.into_inner();
+    match pairs
+        .peek()
+        .expect("expr pair should have sub-parts")
+        .as_rule()
+    {
+        Rule::term => {
+            let climber: PrecClimber<Rule> = PrecClimber::new(vec![
+                // boolean operators
+                Operator::new(Rule::or, Assoc::Left) | Operator::new(Rule::and, Assoc::Left),
+                Operator::new(Rule::cmp_lte, Assoc::Left) | {
+                    Operator::new(Rule::cmp_lt, Assoc::Left)
+                        | Operator::new(Rule::cmp_gte, Assoc::Left)
+                        | Operator::new(Rule::cmp_gt, Assoc::Left)
+                        | Operator::new(Rule::cmp_ne, Assoc::Left)
+                        | Operator::new(Rule::cmp_eq, Assoc::Left)
+                },
+                // arithmetic operators
+                Operator::new(Rule::bit_or, Assoc::Left)
+                    | Operator::new(Rule::bit_and, Assoc::Left),
+                Operator::new(Rule::plus, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
+                Operator::new(Rule::multiply, Assoc::Left)
+                    | Operator::new(Rule::divide, Assoc::Left),
+                // dot operator...
+                Operator::new(Rule::dot, Assoc::Left),
+            ]);
 
-    let primary = |pair: Pair<Rule>| parse_term(pair).unwrap();
-    let infix = |left: Term, op: Pair<Rule>, right: Term| {
-        let op = match op.as_rule() {
-            Rule::plus => Op::Plus,
-            Rule::sub => Op::Sub,
-            Rule::multiply => Op::Multiply,
-            Rule::divide => Op::Divide,
-            Rule::cmp_lt => Op::Lt,
-            Rule::cmp_lte => Op::Lte,
-            Rule::cmp_gt => Op::Gt,
-            Rule::cmp_gte => Op::Gte,
-            Rule::cmp_eq => Op::Eq,
-            Rule::cmp_ne => Op::Ne,
-            Rule::dot => Op::Dot,
-            Rule::and => Op::And,
-            Rule::or => Op::Or,
-            Rule::bit_and => Op::BitAnd,
-            Rule::bit_or => Op::BitOr,
-            other => panic!("Unrecognized operator {:?}", other),
-        };
-        Term::binary_op(op, left, right)
-    };
-    let pairs = pair.into_inner();
-    let result = climber.climb(pairs, primary, infix);
-    Ok(Expression::new(result))
+            let primary = |pair: Pair<Rule>| parse_term(pair).unwrap();
+            let infix = |left: Term, op: Pair<Rule>, right: Term| {
+                let op = match op.as_rule() {
+                    Rule::plus => Op::Plus,
+                    Rule::sub => Op::Sub,
+                    Rule::multiply => Op::Multiply,
+                    Rule::divide => Op::Divide,
+                    Rule::cmp_lt => Op::Lt,
+                    Rule::cmp_lte => Op::Lte,
+                    Rule::cmp_gt => Op::Gt,
+                    Rule::cmp_gte => Op::Gte,
+                    Rule::cmp_eq => Op::Eq,
+                    Rule::cmp_ne => Op::Ne,
+                    Rule::dot => Op::Dot,
+                    Rule::and => Op::And,
+                    Rule::or => Op::Or,
+                    Rule::bit_and => Op::BitAnd,
+                    Rule::bit_or => Op::BitOr,
+                    other => panic!("Unrecognized operator {:?}", other),
+                };
+                Term::binary_op(op, left, right)
+            };
+            let result = climber.climb(pairs, primary, infix);
+            Ok(Expression::new(result))
+        }
+        Rule::unary_operator => {
+            let unary_op = pairs.next().unwrap();
+            let operand = parse_term(pairs.next().expect("A term should follow a unary op"))?;
+            let op = match unary_op.into_inner().next().unwrap().as_rule() {
+                Rule::not => UnaryOp::Not,
+                Rule::bit_not => UnaryOp::BitNot,
+                Rule::neg => UnaryOp::Neg,
+                _ => unreachable!(),
+            };
+            Ok(Expression::new(Term::unary_op(op, operand)))
+        }
+        _ => unreachable!(),
+    }
 }
 
 fn parse_new_expr(pair: Pair<Rule>) -> Result<Term> {
@@ -565,6 +587,8 @@ mod tests {
     }
 
     mod expr {
+        use crate::ast::UnaryOp;
+
         use super::*;
         fn parse_expr_from_str(s: &str) -> Expression {
             let pair = FUNParser::parse(Rule::expr, s).unwrap().next().unwrap();
@@ -635,6 +659,15 @@ mod tests {
             assert_eq!(
                 expr.term(),
                 &Term::binary_op(Op::Plus, Term::Number(3), Term::Number(4))
+            );
+        }
+
+        #[test]
+        fn test_unary_opeartor_expr() {
+            let expr = parse_expr_from_str("~1");
+            assert_eq!(
+                expr.term(),
+                &Term::unary_op(UnaryOp::BitNot, Term::Number(1))
             );
         }
 

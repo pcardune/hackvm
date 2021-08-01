@@ -10,9 +10,14 @@ string = @{
   }
 array = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]"}
 
+not = {"!"}
+bit_not = {"~"}
+neg = {"-"}
+
 unary_operator = {
-  "!"
-  | "~"
+  neg
+  | not
+  | bit_not
 }
 bit_or = { "|" }
 bit_and = { "&" }
@@ -63,7 +68,8 @@ term = {
   | ("(" ~ expr ~ ")")
 }
 expr = {
-  term ~ (binary_operator ~ term)*
+  (unary_operator ~ term)
+  | (term ~ (binary_operator ~ term)*)
 }
 // TYPES
 type_ref = ${

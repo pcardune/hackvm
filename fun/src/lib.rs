@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context, Result};
 
 mod ast;
 mod compiler;
-mod parser;
+mod lexer;
 
 use ast::{
     AssignmentStatement, Block, ClassDecl, Expression, IfStatement, Module, Node, Parameter, Scope,
@@ -13,7 +13,7 @@ use ast::{
 };
 use compiler::ModuleCompiler;
 use hackvm::VMToken;
-use parser::{FUNParser, Rule};
+use lexer::{FUNLexer, Rule};
 use pest::Parser;
 use pest::{
     iterators::Pair,
@@ -30,7 +30,7 @@ pub fn compile(input: &str) -> Result<Vec<VMToken>> {
 
 pub fn parse_module(input: &str) -> Result<Module> {
     let mut classes = vec![];
-    let pairs = FUNParser::parse(Rule::file, input)
+    let pairs = FUNLexer::parse(Rule::file, input)
         .with_context(|| anyhow!("fun::parse_module: failed tokenizing to pairs"))?;
     for pair in pairs {
         match pair.as_rule() {
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_block() {
-        let pair = FUNParser::parse(
+        let pair = FUNLexer::parse(
             Rule::block,
             "{
                 let i: number = 0;
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_let_statement() {
-        let pair = FUNParser::parse(Rule::let_statement, "let foo: number = 0;")
+        let pair = FUNLexer::parse(Rule::let_statement, "let foo: number = 0;")
             .expect("failed to parse")
             .next()
             .unwrap();
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_if_statement() {
-        let pair = FUNParser::parse(
+        let pair = FUNLexer::parse(
             Rule::if_statement,
             "if (true) { yay = 1; } else { yay = 2; }",
         )
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_assignment_statement() {
-        let pair = FUNParser::parse(Rule::assignment_statement, "foo = 0;")
+        let pair = FUNLexer::parse(Rule::assignment_statement, "foo = 0;")
             .expect("failed to parse")
             .next()
             .unwrap();
@@ -591,7 +591,7 @@ mod tests {
 
         use super::*;
         fn parse_expr_from_str(s: &str) -> Expression {
-            let pair = FUNParser::parse(Rule::expr, s).unwrap().next().unwrap();
+            let pair = FUNLexer::parse(Rule::expr, s).unwrap().next().unwrap();
             parse_expr(pair).unwrap()
         }
 

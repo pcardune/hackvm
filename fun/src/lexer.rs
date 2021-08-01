@@ -3,7 +3,7 @@ use pest::Parser;
 
 #[derive(Parser)]
 #[grammar = "fun.pest"]
-pub struct FUNParser;
+pub struct FUNLexer;
 
 #[cfg(test)]
 mod tests {
@@ -11,13 +11,13 @@ mod tests {
 
     #[test]
     fn test_comments() {
-        FUNParser::parse(Rule::COMMENT, "// this is a comment").unwrap();
+        FUNLexer::parse(Rule::COMMENT, "// this is a comment").unwrap();
     }
 
     fn assert_all_bad(rule: Rule, bad: &[&str]) {
         bad.iter().for_each(|t| {
             assert!(
-                FUNParser::parse(rule, t).is_err(),
+                FUNLexer::parse(rule, t).is_err(),
                 "Expected \"{}\" not to parse, but it did.",
                 t
             );
@@ -26,7 +26,7 @@ mod tests {
 
     fn assert_all_good(rule: Rule, good: &[&str]) {
         good.iter().for_each(|t| {
-            let s = FUNParser::parse(rule, t)
+            let s = FUNLexer::parse(rule, t)
                 .expect(&format!("\"{}\" failed to parse", t))
                 .as_str();
             assert_eq!(s, *t);
@@ -45,13 +45,13 @@ mod tests {
             "fda",
         ];
         assert_all_good(Rule::identifier, &good);
-        assert!(FUNParser::parse(Rule::identifier, "1foo").is_err());
+        assert!(FUNLexer::parse(Rule::identifier, "1foo").is_err());
         assert_eq!(
-            FUNParser::parse(Rule::identifier, "foo").unwrap().as_str(),
+            FUNLexer::parse(Rule::identifier, "foo").unwrap().as_str(),
             "foo"
         );
         assert_eq!(
-            FUNParser::parse(Rule::identifier, "f_bar_baz o o")
+            FUNLexer::parse(Rule::identifier, "f_bar_baz o o")
                 .unwrap()
                 .as_str(),
             "f_bar_baz"
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let result = FUNParser::parse(
+        let result = FUNLexer::parse(
             Rule::file,
             "
 class Vector {

@@ -229,6 +229,7 @@ fn parse_if_statement(pair: Pair<Rule>) -> Result<IfStatement> {
 
 fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
     let climber: PrecClimber<Rule> = PrecClimber::new(vec![
+        // boolean operators
         Operator::new(Rule::or, Assoc::Left) | Operator::new(Rule::and, Assoc::Left),
         Operator::new(Rule::cmp_lte, Assoc::Left) | {
             Operator::new(Rule::cmp_lt, Assoc::Left)
@@ -237,8 +238,11 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
                 | Operator::new(Rule::cmp_ne, Assoc::Left)
                 | Operator::new(Rule::cmp_eq, Assoc::Left)
         },
+        // arithmetic operators
+        Operator::new(Rule::bit_or, Assoc::Left) | Operator::new(Rule::bit_and, Assoc::Left),
         Operator::new(Rule::plus, Assoc::Left) | Operator::new(Rule::sub, Assoc::Left),
         Operator::new(Rule::multiply, Assoc::Left) | Operator::new(Rule::divide, Assoc::Left),
+        // dot operator...
         Operator::new(Rule::dot, Assoc::Left),
     ]);
 
@@ -258,6 +262,8 @@ fn parse_expr(pair: Pair<Rule>) -> Result<Expression> {
             Rule::dot => Op::Dot,
             Rule::and => Op::And,
             Rule::or => Op::Or,
+            Rule::bit_and => Op::BitAnd,
+            Rule::bit_or => Op::BitOr,
             other => panic!("Unrecognized operator {:?}", other),
         };
         Term::binary_op(op, left, right)
@@ -316,6 +322,7 @@ fn parse_call_expr(pair: Pair<Rule>) -> Result<Term> {
 }
 
 fn parse_term(pair: Pair<Rule>) -> Result<Term> {
+    assert_eq!(pair.as_rule(), Rule::term);
     for pair in pair.into_inner() {
         match pair.as_rule() {
             Rule::number => {
@@ -355,6 +362,10 @@ fn parse_term(pair: Pair<Rule>) -> Result<Term> {
                 return parse_index_expr(pair);
             }
             Rule::identifier => return Ok(Term::Identifier(pair.as_str().to_string())),
+            Rule::expr => {
+                return Ok(Term::Expr(Box::new(parse_expr(pair)?)));
+                // return parse_expr(pair)
+            }
             _ => panic!(
                 "Not sure what to do with rule {:?}: {}",
                 pair.as_rule(),

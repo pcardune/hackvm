@@ -241,6 +241,8 @@ pub enum Op {
     Sub,
     Multiply,
     Divide,
+    BitAnd,
+    BitOr,
     Lt,
     Lte,
     Gt,
@@ -258,11 +260,13 @@ pub enum Term {
     Bool(bool),
     String(String),
     Array(Vec<Expression>),
-    Identifier(String),
-    BinaryOp(Op, Box<Term>, Box<Term>),
-    Call(String, Vec<Expression>),
     New(String, Vec<Expression>),
+    Call(String, Vec<Expression>),
     Indexing(Box<Expression>, Box<Expression>),
+    Identifier(String),
+    Expr(Box<Expression>),
+
+    BinaryOp(Op, Box<Term>, Box<Term>),
 }
 
 impl Term {

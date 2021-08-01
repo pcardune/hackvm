@@ -14,6 +14,8 @@ unary_operator = {
   "!"
   | "~"
 }
+bit_or = { "|" }
+bit_and = { "&" }
 or = { "||" }
 and = { "&&" }
 dot = { "." }
@@ -36,6 +38,8 @@ binary_operator = _{
   | divide
   | and
   | or
+  | bit_or
+  | bit_and
   | cmp_lte
   | cmp_lt
   | cmp_gte

@@ -86,7 +86,7 @@ mod tests {
     fn test_expr() {
         let good = vec![
             "a || b", "a && b", "a+b", "a-b", "a*b", "a/b", "a > b", "a < b", "a <= b", "a >= b",
-            "a == b", "a != b",
+            "a == b", "a != b", "a & b", "a | b",
         ];
         assert_all_good(Rule::expr, &good);
     }

@@ -671,6 +671,8 @@ impl<'class> MethodDeclCompiler<'class> {
             Term::Indexing(identifer_expr, index_expr) => {
                 self.compile_indexing_expr(identifer_expr, index_expr)
             }
+            Term::Array(expressions) => self.compile_array_literal(expressions),
+            Term::Expr(expression) => self.compile_expression(expression),
             _ => panic!("Don't know how to compile {:?}", term),
         }
     }
@@ -694,6 +696,34 @@ impl<'class> MethodDeclCompiler<'class> {
     ) -> Result<Vec<VMToken>> {
         let mut tokens = self.compile_indexing_pointer(identifier_expr, index_expr)?;
         tokens.push(VMToken::Push(VMSegment::That, 0));
+        Ok(tokens)
+    }
+
+    fn compile_array_literal(&mut self, elements: &Vec<Expression>) -> Result<Vec<VMToken>> {
+        let mut tokens = vec![];
+        for expr in elements {
+            tokens.extend(self.compile_expression(expr)?);
+        }
+
+        tokens.extend(vec![
+            VMToken::Push(VMSegment::Constant, elements.len() as u16),
+            VMToken::Call("Array.new".to_string(), 1),
+        ]);
+
+        // copy array address into THAT
+        tokens.push(VMToken::Pop(VMSegment::Pointer, 1));
+
+        // pop values into array
+        for i in 0..elements.len() {
+            tokens.push(VMToken::Pop(
+                VMSegment::That,
+                (elements.len() - 1 - i) as u16,
+            ));
+        }
+
+        // push pointer to array back onto the stack
+        tokens.push(VMToken::Push(VMSegment::Pointer, 1));
+
         Ok(tokens)
     }
 
@@ -867,6 +897,8 @@ impl<'class> MethodDeclCompiler<'class> {
             Op::Divide => VMToken::Call("Math.divide".to_string(), 2),
             Op::And => VMToken::And,
             Op::Or => VMToken::Or,
+            Op::BitAnd => VMToken::And,
+            Op::BitOr => VMToken::Or,
             _ => todo!("Don't know how to handle op {:?}", op),
         };
         tokens.push(op_token);
@@ -1094,6 +1126,7 @@ mod tests {
                 static foo():boolean  {
                     let a:number = false || true;
                     let b:number = 1+2*3/5;
+                    let c:number = 1 & 2 | 4;
                     return 0 < 1 && 1 > 0 || 3 > 4;
                 }
             }
@@ -1101,10 +1134,10 @@ mod tests {
         )
         .unwrap();
         let vmcode = ModuleCompiler::new(&module).compile().unwrap();
-        assert_eq!(
+        assert_array_eq(
             &vmcode,
             &[
-                VMToken::Function("Foo.foo".to_string(), 2),
+                VMToken::Function("Foo.foo".to_string(), 3),
                 // let a = ...
                 VMToken::Push(VMSegment::Constant, 0),
                 VMToken::Push(VMSegment::Constant, 65535),
@@ -1119,6 +1152,13 @@ mod tests {
                 VMToken::Call("Math.divide".to_string(), 2),
                 VMToken::Add,
                 VMToken::Pop(VMSegment::Local, 1),
+                // let c = ...
+                VMToken::Push(VMSegment::Constant, 1),
+                VMToken::Push(VMSegment::Constant, 2),
+                VMToken::And,
+                VMToken::Push(VMSegment::Constant, 4),
+                VMToken::Or,
+                VMToken::Pop(VMSegment::Local, 2),
                 // return ...
                 VMToken::Push(VMSegment::Constant, 0),
                 VMToken::Push(VMSegment::Constant, 1),
@@ -1131,8 +1171,8 @@ mod tests {
                 VMToken::Push(VMSegment::Constant, 4),
                 VMToken::Gt,
                 VMToken::Or,
-                VMToken::Return
-            ]
+                VMToken::Return,
+            ],
         );
     }
 

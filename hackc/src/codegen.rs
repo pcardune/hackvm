@@ -329,7 +329,7 @@ hack_sys_init:
                 &format!("{}", num_statics * 8),
             )?;
         }
-        info!("Compiled {}", file.name);
+        info!("Compiled {} to assembly", file.name);
     }
 
     output_file

@@ -80,9 +80,13 @@ impl FunFile for StaticFunFile {
     }
 
     fn compile(&self) -> Result<FunFileBackedVMFile> {
-        let vmcode = fun::compile(self.content)
-            .with_context(|| format!("failed compiling {} to vmcode", self.filename))?;
-        info!("Compiled {}", self.filename);
+        let vmcode = fun::compile(self.content).with_context(|| {
+            format!(
+                "StaticFunFile::compile: failed compiling {} to vmcode",
+                self.filename
+            )
+        })?;
+        info!("Compiled {} to vmcode", self.filename);
         Ok(FunFileBackedVMFile {
             source: Box::new(*self),
             tokens: vmcode,
@@ -110,9 +114,12 @@ impl FunFile for FileBackedFunFile {
         let content = fs::read_to_string(&self.path)
             .with_context(|| format!("Failed to read file {}", self.path.to_string_lossy()))?;
         let vmcode = fun::compile(&content).with_context(|| {
-            format!("failed compiling {} to vmcode", self.path.to_string_lossy())
+            format!(
+                "FileBackedFunFile::compile: failed compiling {} to vmcode",
+                self.path.to_string_lossy()
+            )
         })?;
-        info!("Compiled {}", self.path.to_string_lossy());
+        info!("Compiled {} to vmcode", self.path.to_string_lossy());
         Ok(FunFileBackedVMFile {
             source: Box::new(self.clone()),
             tokens: vmcode,
@@ -542,6 +549,7 @@ fn main() {
         .runtime(runtime)
         .include_os(!matches.is_present("no-os"))
         .compile()
+        .with_context(|| anyhow!("Failed compiling {}", input_file_path))
         .unwrap();
 
     if matches.is_present("exec") {

@@ -303,6 +303,8 @@ fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {
 pub struct Runtime {
     cpp_file: Option<PathBuf>,
     emulate_hack_machine: bool,
+    fun_files: Vec<PathBuf>,
+    vm_files: Vec<PathBuf>,
 }
 
 impl Runtime {
@@ -310,6 +312,8 @@ impl Runtime {
         Runtime {
             cpp_file: None,
             emulate_hack_machine: false,
+            fun_files: vec![],
+            vm_files: vec![],
         }
     }
 
@@ -317,14 +321,28 @@ impl Runtime {
         Runtime {
             cpp_file: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/main.cpp")),
             emulate_hack_machine: true,
+            fun_files: vec![
+                PathBuf::from("examples/funcode/OS/Sys.fun"),
+                PathBuf::from("examples/funcode/OS/Memory.fun"),
+            ],
+            vm_files: vec![
+                PathBuf::from("examples/vmcode/OS/Array.vm"),
+                PathBuf::from("examples/vmcode/OS/Keyboard.vm"),
+                PathBuf::from("examples/vmcode/OS/Math.vm"),
+                PathBuf::from("examples/vmcode/OS/Memory.vm"),
+                PathBuf::from("examples/vmcode/OS/Output.vm"),
+                PathBuf::from("examples/vmcode/OS/Screen.vm"),
+                PathBuf::from("examples/vmcode/OS/String.vm"),
+                PathBuf::from("examples/vmcode/OS/Sys.vm"),
+            ],
         }
     }
 
     fn debug() -> Runtime {
-        Runtime {
-            cpp_file: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp")),
-            emulate_hack_machine: true,
-        }
+        let mut runtime = Self::default();
+        runtime.cpp_file =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"));
+        runtime
     }
 
     fn get_entry_point(&self) -> Option<&str> {
@@ -332,6 +350,20 @@ impl Runtime {
             Some(_) => Some("hack_sys_init"),
             None => None,
         }
+    }
+
+    fn get_files(paths: &[PathBuf]) -> Vec<PathBuf> {
+        paths
+            .iter()
+            .map(|p| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p))
+            .collect::<Vec<_>>()
+    }
+
+    fn get_fun_files(&self) -> Vec<PathBuf> {
+        Self::get_files(&self.fun_files)
+    }
+    fn get_vm_files(&self) -> Vec<PathBuf> {
+        Self::get_files(&self.vm_files)
     }
 
     fn compile(&self, out_dir: &Path) -> Result<Option<PathBuf>> {
@@ -402,7 +434,6 @@ struct Executable {
     compiler_input: CompilerInput,
     out_dir: PathBuf,
     runtime: Runtime,
-    include_os: bool,
     output_vmfiles: bool,
 }
 
@@ -412,7 +443,6 @@ impl Executable {
             compiler_input: CompilerInput::new(input_path.to_path_buf()),
             out_dir: out_dir.to_path_buf(),
             runtime: Runtime::default(),
-            include_os: false,
             output_vmfiles: true,
         }
     }
@@ -422,48 +452,33 @@ impl Executable {
         self
     }
 
-    fn include_os(mut self, include_os: bool) -> Executable {
-        self.include_os = include_os;
-        self
-    }
-
     fn compile(&self) -> Result<PathBuf> {
         // compile vmfiles from funcode
-        let mut vmfiles =
-            {
-                let fun_file_paths = self.compiler_input.get_files(FileType::FUN)?;
-                let mut fun_files = fun_file_paths
+        let mut vmfiles = {
+            let fun_file_paths = self.compiler_input.get_files(FileType::FUN)?;
+            let mut fun_files = fun_file_paths
+                .iter()
+                .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
+                .collect::<Vec<_>>();
+
+            fun_files.extend(
+                self.runtime
+                    .get_fun_files()
                     .iter()
-                    .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) })
-                    .collect::<Vec<_>>();
+                    .map(|path| -> Box<dyn FunFile> { Box::new(FileBackedFunFile::new(path)) }),
+            );
 
-                if self.include_os {
-                    #[rustfmt::skip]
-                    let os_files = vec![
-                        ("Sys.fun", std::include_str!("../examples/funcode/OS/Sys.fun")),
-                        ("Memory.fun", std::include_str!("../examples/funcode/OS/Memory.fun")),
-                        // ("Keyboard.fun", std::include_str!("../examples/funcode/OS/Keyboard.fun")),
-                        // ("Screen.fun", std::include_str!("../examples/funcode/OS/Screen.fun")),
-                    ];
-
-                    fun_files.extend(os_files.iter().map(
-                        |(filename, content)| -> Box<dyn FunFile> {
-                            Box::new(StaticFunFile::new(filename, content))
-                        },
-                    ));
-                }
-
-                fun_files
-                    .iter()
-                    .map(|fun_file| -> Result<(String, Box<dyn VMFile>)> {
-                        let result: Result<(String, Box<dyn VMFile>)> = match fun_file.compile() {
-                            Ok(vmfile) => Ok((vmfile.file_name(), Box::new(vmfile))),
-                            Err(e) => Err(e),
-                        };
-                        result
-                    })
-                    .collect::<Result<HashMap<_, _>>>()?
-            };
+            fun_files
+                .iter()
+                .map(|fun_file| -> Result<(String, Box<dyn VMFile>)> {
+                    let result: Result<(String, Box<dyn VMFile>)> = match fun_file.compile() {
+                        Ok(vmfile) => Ok((vmfile.file_name(), Box::new(vmfile))),
+                        Err(e) => Err(e),
+                    };
+                    result
+                })
+                .collect::<Result<HashMap<_, _>>>()?
+        };
 
         // Load additional vmfiles from disk or memory
         {
@@ -478,22 +493,15 @@ impl Executable {
             }
 
             // add vm os files that might be missing
-            if self.include_os {
-                #[rustfmt::skip]
-            let os_files = vec![
-                StaticVMFile::new("Array.vm",    std::include_str!("../examples/vmcode/OS/Array.vm"))?,
-                StaticVMFile::new("Keyboard.vm", std::include_str!("../examples/vmcode/OS/Keyboard.vm"))?,
-                StaticVMFile::new("Math.vm",     std::include_str!("../examples/vmcode/OS/Math.vm"))?,
-                StaticVMFile::new("Memory.vm",   std::include_str!("../examples/vmcode/OS/Memory.vm"))?,
-                StaticVMFile::new("Output.vm",   std::include_str!("../examples/vmcode/OS/Output.vm"))?,
-                StaticVMFile::new("Screen.vm",   std::include_str!("../examples/vmcode/OS/Screen.vm"))?,
-                StaticVMFile::new("String.vm",   std::include_str!("../examples/vmcode/OS/String.vm"))?,
-                StaticVMFile::new("Sys.vm",      std::include_str!("../examples/vmcode/OS/Sys.vm"))?,
-            ];
-                for os_file in os_files {
-                    if !vmfiles.contains_key(&os_file.file_name()) {
-                        vmfiles.insert(os_file.file_name(), Box::new(os_file));
-                    }
+            let os_files = self
+                .runtime
+                .get_vm_files()
+                .iter()
+                .map(|f| FileBackedVMFile::new(f))
+                .collect::<Result<Vec<_>>>()?;
+            for os_file in os_files {
+                if !vmfiles.contains_key(&os_file.file_name()) {
+                    vmfiles.insert(os_file.file_name(), Box::new(os_file));
                 }
             }
         }
@@ -553,7 +561,6 @@ fn main() {
                 .takes_value(true)
                 .default_value("default"),
         )
-        .arg(Arg::with_name("no-os").long("no-os"))
         .arg(Arg::with_name("exec").long("exec"))
         .get_matches();
     let input_file_path = matches.value_of("input").unwrap();
@@ -573,7 +580,6 @@ fn main() {
     fs::create_dir_all(out_dir).unwrap();
     let executable_path = Executable::new(Path::new(input_file_path), out_dir)
         .runtime(runtime)
-        .include_os(!matches.is_present("no-os"))
         .compile()
         .with_context(|| anyhow!("Failed compiling {}", input_file_path))
         .unwrap();

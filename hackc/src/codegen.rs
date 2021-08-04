@@ -5,6 +5,8 @@ use std::io::Write;
 use std::path::Path;
 use std::{cmp, fs};
 
+use crate::Runtime;
+
 fn compile_arithmetic(op: &VMToken) -> String {
     match op {
         VMToken::Add => "\
@@ -79,7 +81,7 @@ fn compile_arithmetic(op: &VMToken) -> String {
 fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
         VMSegment::Temp => {
-            format!("pop     qword [RAM + {}]", (index + 5) * 8)
+            format!("pop     qword [TEMP + {}]", (index + 5) * 8)
         }
         VMSegment::Static => {
             format!(
@@ -100,8 +102,8 @@ fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> St
             1 => "pop r15".to_string(),
             _ => panic!("invalid index for pointer segment: {}", index),
         },
-        VMSegment::This => format!("pop qword [RAM + r14*8 + {}*8]", index),
-        VMSegment::That => format!("pop qword [RAM + r15*8 + {}*8]", index),
+        VMSegment::This => format!("pop {}", context.get_address("r14", *index as usize)),
+        VMSegment::That => format!("pop {}", context.get_address("r15", *index as usize)),
         VMSegment::Constant => panic!("Can't pop to constant segment"),
     }
 }
@@ -120,8 +122,8 @@ fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> S
             1 => "push r15".to_string(),
             _ => panic!("invalid index for pointer segment: {}", index),
         },
-        VMSegment::This => format!("push qword [RAM + r14*8 + {}*8]", index),
-        VMSegment::That => format!("push qword [RAM + r15*8 + {}*8]", index),
+        VMSegment::This => format!("push {}", context.get_address("r14", *index as usize)),
+        VMSegment::That => format!("push {}", context.get_address("r15", *index as usize)),
         VMSegment::Constant => {
             let value = index;
             format!(
@@ -141,7 +143,7 @@ fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> S
         VMSegment::Temp => {
             format!(
                 "\
-                        push     qword [RAM + {}]\n",
+                        push     qword [TEMP + {}]\n",
                 (index + 5) * 8
             )
         }
@@ -158,7 +160,33 @@ fn compile_function(func_name: &str, num_locals: &u16) -> String {
     lines
 }
 
+fn compile_call_c(func_name: &str, num_args: &u16) -> String {
+    let mut s = String::new();
+    let mut registers = vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+
+    if func_name == "syscall" {
+        registers = vec!["rax", "rdi", "rsi", "rdx", "r10", "r8", "r9"];
+    }
+
+    let num_args = cmp::min(*num_args as usize, registers.len());
+    for i in 0..num_args {
+        s.push_str("pop ");
+        s.push_str(registers[num_args - 1 - i]);
+        s.push_str("\n");
+    }
+    if func_name == "syscall" {
+        s.push_str("syscall\n");
+    } else {
+        s.push_str(&format!("call {}\n", func_name));
+    }
+    s.push_str("push rax\n");
+    return s;
+}
+
 fn compile_call(func_name: &str, num_args: &u16) -> String {
+    if func_name.starts_with("c.") {
+        return compile_call_c(func_name.split(".").nth(1).unwrap(), num_args);
+    }
     let mut lines = String::new();
     // push this and that onto the stack
     lines.push_str("push r14\n");
@@ -195,13 +223,21 @@ fn compile_return() -> String {
         .to_string()
 }
 
-struct CommandContext {
+struct CommandContext<'rtm> {
     file_name: String,
+    runtime: &'rtm Runtime,
 }
 
-impl CommandContext {
+impl<'rtm> CommandContext<'_> {
     fn statics_var_name(&self) -> String {
         format!("{}.statics", self.file_name)
+    }
+    fn get_address(&self, register: &'static str, index: usize) -> String {
+        if self.runtime.emulate_hack_machine {
+            format!("qword [RAM + {}*8 + {}]", register, index * 8)
+        } else {
+            format!("qword [{} + {}]", register, index * 8)
+        }
     }
 }
 
@@ -239,7 +275,7 @@ impl DataSection {
 
 pub fn compile_vm_to_asm(
     program: &TokenizedProgram,
-    runtime_hook: bool,
+    runtime: &Runtime,
     output_path: &Path,
 ) -> Result<()> {
     let mut output_file = fs::File::create(output_path).with_context(|| {
@@ -252,31 +288,39 @@ pub fn compile_vm_to_asm(
     data_section.insert("EXIT_SUCCESS", "equ", "0")?;
     data_section.insert("SYS_exit", "equ", "60")?;
     let mut bss_section = DataSection::new("bss");
-    bss_section.insert("RAM", "resq", &format!("{}", (16384 + 8192 + 1) * 8))?;
+    bss_section.insert("TEMP", "resq", &format!("{}", 5 * 8))?;
+    if runtime.emulate_hack_machine {
+        bss_section.insert("RAM", "resq", &format!("{}", (16384 + 8192 + 1) * 8))?;
+    }
 
-    let entry = if runtime_hook {
-        "
-        ; Arguments Passed:
-        ;     1) rdi - address of memory block
-        ; Returns: VOID
-        global hack_sys_init
-        hack_sys_init:
-            mov dword [rdi], 53
-            mov dword [rdi], RAM
-            call sys.init
-            ret
+    let entry = match runtime.get_entry_point() {
+        Some(entry_point) => format!(
+            "
+            ; Arguments Passed:
+            ;     1) rdi - address of memory block
+            ; Returns: VOID
+            global {name}
+            {name}:
+                mov dword [rdi], 53
+                mov dword [rdi], RAM
+                call sys.init
+                ret
+                \n",
+            name = entry_point
+        ),
+        None => "
+            global main
+            main:
+                call sys.init
+                ret
             \n"
-    } else {
-        "
-        global main
-        main:
-            call sys.init
-            ret
-        \n"
+        .to_string(),
     };
 
     let preamble = format!(
         "
+        extern malloc
+        extern putc
         section .text
         {}\n",
         entry
@@ -292,6 +336,7 @@ pub fn compile_vm_to_asm(
         let mut num_statics = 0;
         let context = CommandContext {
             file_name: file.name.clone(),
+            runtime,
         };
         for function in file.functions.iter() {
             for command in function.commands.iter() {

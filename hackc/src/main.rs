@@ -300,51 +300,70 @@ fn assemble(out_dir: &Path, asm_out_path: &Path) -> Result<PathBuf> {
     return Ok(obj_out_path);
 }
 
-struct Runtime {
-    cpp_file: PathBuf,
+pub struct Runtime {
+    cpp_file: Option<PathBuf>,
+    emulate_hack_machine: bool,
 }
 
 impl Runtime {
+    fn none() -> Runtime {
+        Runtime {
+            cpp_file: None,
+            emulate_hack_machine: false,
+        }
+    }
+
     fn default() -> Runtime {
         Runtime {
-            cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/main.cpp"),
+            cpp_file: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/main.cpp")),
+            emulate_hack_machine: true,
         }
     }
 
     fn debug() -> Runtime {
         Runtime {
-            cpp_file: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"),
+            cpp_file: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp")),
+            emulate_hack_machine: true,
         }
     }
 
-    fn compile(&self, out_dir: &Path) -> Result<PathBuf> {
-        let runtime_obj_path = out_dir.join("runtime.o");
-        let mut command = Command::new("g++");
-        command
-            .arg("-g")
-            .arg("-Wall")
-            .arg("-c")
-            .arg(&self.cpp_file)
-            .arg("-o")
-            .arg(&runtime_obj_path);
-
-        if !run("runtime", &mut command) {
-            error!(
-                "Failed compiling runtime {}",
-                self.cpp_file.to_string_lossy()
-            );
-            return Err(anyhow!(
-                "Failed to compile runtime {} with command {:?}",
-                self.cpp_file.to_string_lossy(),
-                command
-            ));
+    fn get_entry_point(&self) -> Option<&str> {
+        match self.cpp_file {
+            Some(_) => Some("hack_sys_init"),
+            None => None,
         }
-        info!(
-            "Compiled runtime {} to {}",
-            self.cpp_file.to_string_lossy(),
-            runtime_obj_path.to_string_lossy()
-        );
-        return Ok(runtime_obj_path);
+    }
+
+    fn compile(&self, out_dir: &Path) -> Result<Option<PathBuf>> {
+        match &self.cpp_file {
+            None => Ok(None),
+            Some(cpp_file) => {
+                let runtime_obj_path = out_dir.join("runtime.o");
+                let mut command = Command::new("g++");
+                command
+                    .arg("-g")
+                    .arg("-Wall")
+                    .arg("-c")
+                    .arg(cpp_file)
+                    .arg("-o")
+                    .arg(&runtime_obj_path);
+
+                if !run("runtime", &mut command) {
+                    error!("Failed compiling runtime {}", cpp_file.to_string_lossy());
+                    return Err(anyhow!(
+                        "Failed to compile runtime {} with command {:?}",
+                        cpp_file.to_string_lossy(),
+                        command
+                    ));
+                }
+                info!(
+                    "Compiled runtime {} to {}",
+                    cpp_file.to_string_lossy(),
+                    runtime_obj_path.to_string_lossy()
+                );
+                return Ok(Some(runtime_obj_path));
+            }
+        }
     }
 }
 
@@ -382,7 +401,7 @@ fn link_executable(out_dir: &Path, obj_paths: &[PathBuf]) -> Result<PathBuf> {
 struct Executable {
     compiler_input: CompilerInput,
     out_dir: PathBuf,
-    runtime: Option<Runtime>,
+    runtime: Runtime,
     include_os: bool,
     output_vmfiles: bool,
 }
@@ -392,13 +411,13 @@ impl Executable {
         Executable {
             compiler_input: CompilerInput::new(input_path.to_path_buf()),
             out_dir: out_dir.to_path_buf(),
-            runtime: Some(Runtime::default()),
+            runtime: Runtime::default(),
             include_os: false,
             output_vmfiles: true,
         }
     }
 
-    fn runtime(mut self, runtime: Option<Runtime>) -> Executable {
+    fn runtime(mut self, runtime: Runtime) -> Executable {
         self.runtime = runtime;
         self
     }
@@ -498,13 +517,13 @@ impl Executable {
         let tokenized_program = TokenizedProgram::from(tokenized_files);
 
         let asm_out_path = self.out_dir.join("out.asm");
-        compile_vm_to_asm(&tokenized_program, self.runtime.is_some(), &asm_out_path)
+        compile_vm_to_asm(&tokenized_program, &self.runtime, &asm_out_path)
             .with_context(|| "Failed compiling vmcode to asm")?;
 
         let obj_out_path = assemble(&self.out_dir, &asm_out_path)?;
         let mut obj_paths = vec![obj_out_path];
-        if let Some(runtime) = &self.runtime {
-            obj_paths.push(runtime.compile(&self.out_dir)?);
+        if let Some(runtime_path) = self.runtime.compile(&self.out_dir)? {
+            obj_paths.push(runtime_path);
         }
 
         return link_executable(&self.out_dir, &obj_paths);
@@ -540,10 +559,10 @@ fn main() {
     let input_file_path = matches.value_of("input").unwrap();
     let out_dir = Path::new("out");
 
-    let runtime: Option<Runtime> = match matches.value_of("runtime") {
-        Some("default") => Some(Runtime::default()),
-        Some("debug") => Some(Runtime::debug()),
-        Some("none") => None,
+    let runtime: Runtime = match matches.value_of("runtime") {
+        Some("default") => Runtime::default(),
+        Some("debug") => Runtime::debug(),
+        Some("none") => Runtime::none(),
         Some(other) => {
             println!("Invalid runtime \"{}\"", other);
             return;
@@ -690,7 +709,7 @@ mod tests {
                     .with_context(|| "Failed writing vmcode to disk")?;
             }
             let executable_path = Executable::new(&program_dir, &out_dir)
-                .runtime(Some(Runtime::debug()))
+                .runtime(Runtime::debug())
                 .compile()
                 .with_context(|| {
                     format!(

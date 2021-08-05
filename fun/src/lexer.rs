@@ -104,6 +104,10 @@ mod tests {
 declare module C {
     function malloc(size: number):number;
 }
+
+let a:number = 1;
+let b:number = a+1;
+
 class Vector {
     
     x: number;
@@ -148,6 +152,5 @@ class PolyLine {
 ",
         )
         .unwrap();
-        println!("Here is what I got: {:?}", result);
     }
 }

@@ -8,6 +8,8 @@ pub struct Module {
     classes: Vec<Node<ClassDecl>>,
     #[getset(get = "pub")]
     declare_statements: Vec<DeclareStatement>,
+    #[getset(get = "pub")]
+    statements: Vec<Statement>,
 }
 
 impl Module {
@@ -15,11 +17,13 @@ impl Module {
         name: &str,
         classes: Vec<Node<ClassDecl>>,
         declare_statements: Vec<DeclareStatement>,
+        statements: Vec<Statement>,
     ) -> Module {
         Module {
             name: name.to_string(),
             classes,
             declare_statements,
+            statements,
         }
     }
 }
@@ -316,6 +320,25 @@ pub enum UnaryOp {
     BitNot,
 }
 
+#[derive(Getters, Debug, PartialEq, Clone)]
+pub struct BinaryOp {
+    #[getset(get = "pub")]
+    op: Op,
+    #[getset(get = "pub")]
+    left: Box<Term>,
+    #[getset(get = "pub")]
+    right: Box<Term>,
+}
+impl BinaryOp {
+    pub fn new(op: Op, left: Term, right: Term) -> BinaryOp {
+        BinaryOp {
+            op,
+            left: Box::from(left),
+            right: Box::from(right),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Term {
     Number(u64),
@@ -328,7 +351,7 @@ pub enum Term {
     Identifier(String),
     Expr(Box<Expression>),
 
-    BinaryOp(Op, Box<Term>, Box<Term>),
+    BinaryOp(BinaryOp),
     UnaryOp(UnaryOp, Box<Term>),
 }
 
@@ -337,7 +360,7 @@ impl Term {
         Term::UnaryOp(op, Box::from(operand))
     }
     pub fn binary_op(op: Op, left: Term, right: Term) -> Term {
-        Term::BinaryOp(op, Box::from(left), Box::from(right))
+        Term::BinaryOp(BinaryOp::new(op, left, right))
     }
 
     pub fn identifier(s: &str) -> Term {
@@ -379,9 +402,9 @@ impl Term {
             None
         }
     }
-    pub fn as_binary_op(&self) -> Option<(&Op, &Box<Term>, &Box<Term>)> {
-        if let Term::BinaryOp(op, t1, t2) = self {
-            Some((op, t1, t2))
+    pub fn as_binary_op(&self) -> Option<&BinaryOp> {
+        if let Term::BinaryOp(binary_op) = self {
+            Some(binary_op)
         } else {
             None
         }

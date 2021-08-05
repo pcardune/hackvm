@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::usize;
 
 use crate::ast::{
-    AssignmentStatement, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, UnaryOp,
+    AssignmentStatement, BinaryOp, Block, ClassDecl, IfStatement, MethodDecl, Node, Scope, UnaryOp,
     WhileStatement,
 };
 use crate::ast::{Expression, LetStatement, Module, Op, Statement, Term};
@@ -531,7 +531,9 @@ impl<'class> MethodDeclCompiler<'class> {
         let mut tokens = self.compile_expression(assignment_statement.value_expr())?;
         let dest_term = assignment_statement.dest_expr().term();
         let mut dest_tokens: Vec<VMToken> = match dest_term {
-            Term::BinaryOp(Op::Dot, left, right) => {
+            Term::BinaryOp(binop) if *binop.op() == Op::Dot => {
+                let left = binop.left();
+                let right = binop.right();
                 if let Some(left_identifier) = left.as_identifer() {
                     if let Some(field_name) = right.as_identifer() {
                         if left_identifier == "this" {
@@ -671,7 +673,7 @@ impl<'class> MethodDeclCompiler<'class> {
                 true => Ok(vec![VMToken::Push(VMSegment::Constant, 0xffff)]),
             },
             Term::Number(num) => return Ok(vec![VMToken::Push(VMSegment::Constant, *num as u16)]),
-            Term::BinaryOp(op, left, right) => self.compile_binary_op(op, left, right),
+            Term::BinaryOp(binop) => self.compile_binary_op(binop),
             Term::UnaryOp(op, operand) => self.compile_unary_op(op, operand),
             Term::Identifier(name) => self.compile_reference(name),
             Term::New(class_name, arguments) => self.compile_call(class_name, "new", arguments),
@@ -898,13 +900,14 @@ impl<'class> MethodDeclCompiler<'class> {
         Ok(tokens)
     }
 
-    fn compile_binary_op(&mut self, op: &Op, left: &Term, right: &Term) -> Result<Vec<VMToken>> {
-        if op == &Op::Dot {
-            return self.compile_dot_op(left, right);
+    fn compile_binary_op(&mut self, binop: &BinaryOp) -> Result<Vec<VMToken>> {
+        // op: &Op, left: &Term, right: &Term
+        if binop.op() == &Op::Dot {
+            return self.compile_dot_op(binop.left(), binop.right());
         }
-        let mut tokens = self.compile_term(left)?;
-        tokens.append(&mut self.compile_term(right)?);
-        let op_token = match op {
+        let mut tokens = self.compile_term(binop.left())?;
+        tokens.append(&mut self.compile_term(binop.right())?);
+        let op_token = match binop.op() {
             Op::Plus => VMToken::Add,
             Op::Sub => VMToken::Sub,
             Op::Lt => VMToken::Lt,
@@ -916,7 +919,7 @@ impl<'class> MethodDeclCompiler<'class> {
             Op::Or => VMToken::Or,
             Op::BitAnd => VMToken::And,
             Op::BitOr => VMToken::Or,
-            _ => todo!("Don't know how to handle op {:?}", op),
+            _ => todo!("Don't know how to handle op {:?}", binop.op()),
         };
         tokens.push(op_token);
         Ok(tokens)

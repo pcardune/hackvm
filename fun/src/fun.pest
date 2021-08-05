@@ -135,6 +135,6 @@ declare_statement = {
 
 file = {
   SOI ~
-  (class_decl | declare_statement)* ~
+  (class_decl | declare_statement | statement)* ~
   EOI
 }

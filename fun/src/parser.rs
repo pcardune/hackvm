@@ -13,30 +13,27 @@ use pest::{
 use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatement};
 
 pub fn parse_module(input: &str) -> Result<Module> {
+    let pairs = FUNLexer::parse(Rule::file, input)
+        .with_context(|| anyhow!("fun::parse_module: failed tokenizing to pairs"))?
+        .next()
+        .unwrap()
+        .into_inner();
+
     let mut classes = vec![];
     let mut declare_statements = Vec::new();
-    let pairs = FUNLexer::parse(Rule::file, input)
-        .with_context(|| anyhow!("fun::parse_module: failed tokenizing to pairs"))?;
+    let mut statements = Vec::new();
     for pair in pairs {
         match pair.as_rule() {
-            Rule::file => {
-                for pair in pair.into_inner() {
-                    match pair.as_rule() {
-                        Rule::class_decl => classes.push(Node::from_pair(pair)?),
-                        Rule::declare_statement => {
-                            declare_statements.push(parse_declare_statement(pair)?)
-                        }
-                        Rule::EOI => {
-                            break;
-                        }
-                        _ => panic!("Not sure what to do with {:?}", pair),
-                    }
-                }
+            Rule::class_decl => classes.push(Node::from_pair(pair)?),
+            Rule::declare_statement => declare_statements.push(parse_declare_statement(pair)?),
+            Rule::statement => statements.push(parse_statement(pair)?),
+            Rule::EOI => {
+                break;
             }
             _ => panic!("Not sure what to do with {:?}", pair),
         }
     }
-    return Ok(Module::new("", classes, declare_statements));
+    return Ok(Module::new("", classes, declare_statements, statements));
 }
 
 impl Node<ClassDecl> {
@@ -179,39 +176,42 @@ fn parse_parameter_decl(pair: Pair<Rule>) -> Result<Vec<Parameter>> {
     Ok(params)
 }
 
-fn parse_block(pair: Pair<Rule>) -> Result<Block> {
-    let mut statements: Vec<Statement> = vec![];
-    for pair in pair.into_inner() {
-        for pair in pair.into_inner() {
-            let statement: Statement = match pair.as_rule() {
-                Rule::let_statement => Statement::Let(parse_let_statement(pair)?),
-                Rule::while_statement => Statement::While(parse_while_statement(pair)?),
-                Rule::if_statement => Statement::If(parse_if_statement(pair)?),
-                Rule::return_statement => {
-                    let expr = if let Some(pair) = pair.into_inner().next() {
-                        parse_expr(pair)?
-                    } else {
-                        Expression::new(Term::Number(0))
-                    };
-                    Statement::Return(expr)
-                }
-                Rule::assignment_statement => {
-                    Statement::Assignment(parse_assignment_statement(pair)?)
-                }
-                Rule::expr_statement => Statement::Expr(parse_expr(
-                    pair.into_inner()
-                        .next()
-                        .expect("expression statement should contain expression"),
-                )?),
-                _ => panic!("Not sure what to do with {}", pair),
+pub fn parse_statement(pair: Pair<Rule>) -> Result<Statement> {
+    assert_eq!(pair.as_rule(), Rule::statement);
+    let pair = pair.into_inner().next().unwrap();
+    let statement = match pair.as_rule() {
+        Rule::let_statement => Statement::Let(parse_let_statement(pair)?),
+        Rule::while_statement => Statement::While(parse_while_statement(pair)?),
+        Rule::if_statement => Statement::If(parse_if_statement(pair)?),
+        Rule::return_statement => {
+            let expr = if let Some(pair) = pair.into_inner().next() {
+                parse_expr(pair)?
+            } else {
+                Expression::new(Term::Number(0))
             };
-            statements.push(statement);
+            Statement::Return(expr)
         }
-    }
+        Rule::assignment_statement => Statement::Assignment(parse_assignment_statement(pair)?),
+        Rule::expr_statement => Statement::Expr(parse_expr(
+            pair.into_inner()
+                .next()
+                .expect("expression statement should contain expression"),
+        )?),
+        _ => panic!("Not sure what to do with {}", pair),
+    };
+    Ok(statement)
+}
+
+fn parse_block(pair: Pair<Rule>) -> Result<Block> {
+    assert_eq!(pair.as_rule(), Rule::block);
+    let statements = pair
+        .into_inner()
+        .map(parse_statement)
+        .collect::<Result<Vec<_>>>()?;
     Ok(Block::new(statements))
 }
 
-fn parse_let_statement(pair: Pair<Rule>) -> Result<LetStatement> {
+pub fn parse_let_statement(pair: Pair<Rule>) -> Result<LetStatement> {
     let mut pairs = pair.into_inner();
     let (name, type_name) =
         parse_typed_identifier(pairs.next().expect("no typed identifier found"))?;
@@ -363,7 +363,7 @@ fn parse_call_expr(pair: Pair<Rule>) -> Result<Term> {
     Ok(Term::Call(func_name.to_owned(), arguments))
 }
 
-fn parse_term(pair: Pair<Rule>) -> Result<Term> {
+pub fn parse_term(pair: Pair<Rule>) -> Result<Term> {
     assert_eq!(pair.as_rule(), Rule::term);
     for pair in pair.into_inner() {
         match pair.as_rule() {
@@ -425,6 +425,12 @@ mod tests {
     fn test_empty_module() {
         let module = parse_module("").expect("Empty module did not parse");
         assert_eq!(module.classes().len(), 0, "Empty modules have 0 classes");
+    }
+
+    #[test]
+    fn test_top_level_statements() {
+        let module = parse_module("let a:number = 1;").unwrap();
+        assert_eq!(module.statements().len(), 1);
     }
 
     #[test]
@@ -695,13 +701,13 @@ mod tests {
         fn test_nested_expr() {
             // this should become (3 + 4) + 5
             let expr = parse_expr_from_str("3+4+5");
-            let (op, a, b) = expr.term().as_binary_op().unwrap();
-            assert_eq!(op, &Op::Plus);
-            assert_eq!(b.as_number(), Some(5));
-            let (op, a, b) = a.as_binary_op().unwrap();
-            assert_eq!(op, &Op::Plus);
-            assert_eq!(a.as_number(), Some(3));
-            assert_eq!(b.as_number(), Some(4));
+            let binop = expr.term().as_binary_op().unwrap();
+            assert_eq!(binop.op(), &Op::Plus);
+            assert_eq!(binop.right().as_number(), Some(5));
+            let binop = binop.left().as_binary_op().unwrap();
+            assert_eq!(binop.op(), &Op::Plus);
+            assert_eq!(binop.left().as_number(), Some(3));
+            assert_eq!(binop.right().as_number(), Some(4));
         }
 
         #[test]

@@ -373,6 +373,8 @@ impl Runtime {
         let mut runtime = Self::default();
         runtime.cpp_file =
             Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/debug.cpp"));
+        runtime.vm_files = vec![];
+        runtime.fun_files = vec![];
         runtime
     }
 

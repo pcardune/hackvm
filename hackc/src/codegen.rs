@@ -81,7 +81,7 @@ fn compile_arithmetic(op: &VMToken) -> String {
 fn compile_pop(context: &CommandContext, segment: &VMSegment, index: &u16) -> String {
     match segment {
         VMSegment::Temp => {
-            format!("pop     qword [TEMP + {}]", (index + 5) * 8)
+            format!("pop     qword [RAM + {}]", (index + 5) * 8)
         }
         VMSegment::Static => {
             format!(
@@ -143,7 +143,7 @@ fn compile_push(context: &CommandContext, segment: &VMSegment, index: &u16) -> S
         VMSegment::Temp => {
             format!(
                 "\
-                        push     qword [TEMP + {}]\n",
+                        push     qword [RAM + {}]\n",
                 (index + 5) * 8
             )
         }
@@ -289,10 +289,12 @@ pub fn compile_vm_to_asm(
     data_section.insert("EXIT_SUCCESS", "equ", "0")?;
     data_section.insert("SYS_exit", "equ", "60")?;
     let mut bss_section = DataSection::new("bss");
-    bss_section.insert("TEMP", "resq", &format!("{}", 5 * 8))?;
-    if runtime.emulate_hack_machine {
-        bss_section.insert("RAM", "resq", &format!("{}", (16384 + 8192 + 1) * 8))?;
-    }
+    let ram_size = if runtime.emulate_hack_machine {
+        (16384 + 8192 + 1) * 8
+    } else {
+        10 * 8
+    };
+    bss_section.insert("RAM", "resq", &format!("{}", ram_size))?;
 
     let entry = match runtime.get_entry_point() {
         Some(entry_point) => format!(

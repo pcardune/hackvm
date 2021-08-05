@@ -3,7 +3,7 @@ use std::cmp;
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Segment {
     Constant,
     Argument,

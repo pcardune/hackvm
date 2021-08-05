@@ -256,7 +256,7 @@ mod module {
             // start by adding built-in types
             // TODO: make types support generics and use that
             // instead of number[]
-            for type_name in &["number", "bool", "number[]"] {
+            for type_name in &["number", "bool", "number[]", "string"] {
                 self.object_types
                     .add_type(type_name, ObjectType::new(type_name))?;
             }
@@ -654,6 +654,9 @@ impl<'class> MethodDeclCompiler<'class> {
     fn compile_reference(&mut self, reference: &str) -> Result<Vec<VMToken>> {
         if let Some(mem_ref) = self.local_names.get(reference) {
             return Ok(vec![mem_ref.as_push_token()]);
+        }
+        if reference == "this" {
+            return Ok(vec![VMToken::Push(VMSegment::Pointer, 0)]);
         }
         Err(anyhow!(
             "variable \"{}\" has not been declared with a let statement",

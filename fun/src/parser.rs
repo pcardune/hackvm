@@ -1,6 +1,6 @@
 use crate::ast::{
-    AssignmentStatement, Block, ClassDecl, Expression, IfStatement, Module, Node, Parameter, Scope,
-    Term, UnaryOp,
+    AssignmentStatement, Block, ClassDecl, DeclareFunction, DeclareModule, DeclareStatement,
+    Expression, IfStatement, Module, Node, Parameter, Scope, Term, UnaryOp,
 };
 use crate::lexer::{FUNLexer, Rule};
 use anyhow::{anyhow, Context, Result};
@@ -14,6 +14,7 @@ use crate::ast::{FieldDecl, LetStatement, MethodDecl, Op, Statement, WhileStatem
 
 pub fn parse_module(input: &str) -> Result<Module> {
     let mut classes = vec![];
+    let mut declare_statements = Vec::new();
     let pairs = FUNLexer::parse(Rule::file, input)
         .with_context(|| anyhow!("fun::parse_module: failed tokenizing to pairs"))?;
     for pair in pairs {
@@ -22,6 +23,9 @@ pub fn parse_module(input: &str) -> Result<Module> {
                 for pair in pair.into_inner() {
                     match pair.as_rule() {
                         Rule::class_decl => classes.push(Node::from_pair(pair)?),
+                        Rule::declare_statement => {
+                            declare_statements.push(parse_declare_statement(pair)?)
+                        }
                         Rule::EOI => {
                             break;
                         }
@@ -32,7 +36,7 @@ pub fn parse_module(input: &str) -> Result<Module> {
             _ => panic!("Not sure what to do with {:?}", pair),
         }
     }
-    return Ok(Module::new(classes));
+    return Ok(Module::new("", classes, declare_statements));
 }
 
 impl Node<ClassDecl> {
@@ -94,6 +98,38 @@ impl Node<ClassDecl> {
             constructor,
         )))
     }
+}
+
+fn parse_declare_statement(pair: Pair<Rule>) -> Result<DeclareStatement> {
+    assert_eq!(pair.as_rule(), Rule::declare_statement);
+    let mut pairs = pair.into_inner();
+    let name = pairs
+        .next()
+        .expect("declare_statement starts with identifier")
+        .as_str()
+        .to_string();
+    let functions = pairs.map(parse_function).collect::<Result<Vec<_>>>()?;
+    Ok(DeclareStatement::Module(DeclareModule::new(
+        name, functions,
+    )))
+}
+
+fn parse_function(pair: Pair<Rule>) -> Result<DeclareFunction> {
+    assert_eq!(pair.as_rule(), Rule::function);
+    let mut pairs = pair.into_inner();
+    let name = pairs
+        .next()
+        .expect("function should start with identifier")
+        .as_str()
+        .to_string();
+    let parameters =
+        parse_parameter_decl(pairs.next().expect("function should have parameter decl"))?;
+    let type_name = pairs
+        .next()
+        .expect("function should have type_ref")
+        .as_str()
+        .to_string();
+    Ok(DeclareFunction::new(name, type_name, parameters))
 }
 
 fn parse_field_decl<'a>(pair: Pair<'a, Rule>, scope: Scope) -> Result<Node<FieldDecl>> {

@@ -5,7 +5,7 @@ extern crate log;
 use anyhow::{anyhow, Context, Result};
 use clap::{App, Arg};
 use hackvm::{TokenizedFile, TokenizedProgram, VMToken};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -80,7 +80,7 @@ impl FunFile for StaticFunFile {
     }
 
     fn compile(&self) -> Result<FunFileBackedVMFile> {
-        let vmcode = fun::compile(self.content).with_context(|| {
+        let compiler_output = fun::compile(self.content).with_context(|| {
             format!(
                 "StaticFunFile::compile: failed compiling {} to vmcode",
                 self.filename
@@ -89,7 +89,7 @@ impl FunFile for StaticFunFile {
         info!("Compiled {} to vmcode", self.filename);
         Ok(FunFileBackedVMFile {
             source: Box::new(*self),
-            tokens: vmcode,
+            compiler_output,
         })
     }
 }
@@ -113,7 +113,7 @@ impl FunFile for FileBackedFunFile {
     fn compile(&self) -> Result<FunFileBackedVMFile> {
         let content = fs::read_to_string(&self.path)
             .with_context(|| format!("Failed to read file {}", self.path.to_string_lossy()))?;
-        let vmcode = fun::compile(&content).with_context(|| {
+        let compiler_output = fun::compile(&content).with_context(|| {
             format!(
                 "FileBackedFunFile::compile: failed compiling {} to vmcode",
                 self.path.to_string_lossy()
@@ -122,7 +122,7 @@ impl FunFile for FileBackedFunFile {
         info!("Compiled {} to vmcode", self.path.to_string_lossy());
         Ok(FunFileBackedVMFile {
             source: Box::new(self.clone()),
-            tokens: vmcode,
+            compiler_output,
         })
     }
 }
@@ -130,6 +130,7 @@ impl FunFile for FileBackedFunFile {
 trait VMFile {
     fn file_name(&self) -> String;
     fn tokens(&self) -> &[VMToken];
+    fn fun_compiler_output(&self) -> Option<&fun::CompilerOutput>;
 
     fn to_tokenized_file(&self) -> Result<TokenizedFile> {
         TokenizedFile::from_tokens(&self.file_name(), self.tokens()).map_err(|e| anyhow!("{}", e))
@@ -163,12 +164,30 @@ trait VMFile {
 
 struct FunFileBackedVMFile {
     source: Box<dyn FunFile>,
-    tokens: Vec<VMToken>,
+    compiler_output: fun::CompilerOutput,
+}
+
+fn extern_functions(compiler_output: &fun::CompilerOutput) -> impl Iterator<Item = &str> {
+    compiler_output
+        .ast
+        .declare_statements()
+        .iter()
+        .filter_map(|statement| match statement {
+            fun::ast::DeclareStatement::Module(declare_module) => {
+                if declare_module.name() == "C" {
+                    Some(declare_module.functions())
+                } else {
+                    None
+                }
+            }
+        })
+        .flatten()
+        .map(|func| func.name())
 }
 
 impl VMFile for FunFileBackedVMFile {
     fn tokens(&self) -> &[VMToken] {
-        &self.tokens
+        &self.compiler_output.vmtokens
     }
     fn file_name(&self) -> String {
         let mut name = self.source.path().to_path_buf();
@@ -177,6 +196,10 @@ impl VMFile for FunFileBackedVMFile {
             .expect("FunFile path should be a file")
             .to_string_lossy()
             .to_string()
+    }
+
+    fn fun_compiler_output(&self) -> Option<&fun::CompilerOutput> {
+        Some(&self.compiler_output)
     }
 }
 
@@ -209,6 +232,10 @@ impl VMFile for FileBackedVMFile {
     fn tokens(&self) -> &[VMToken] {
         &self.tokens
     }
+
+    fn fun_compiler_output(&self) -> Option<&fun::CompilerOutput> {
+        None
+    }
 }
 
 struct StaticVMFile {
@@ -230,6 +257,10 @@ impl VMFile for StaticVMFile {
 
     fn tokens(&self) -> &[VMToken] {
         &self.tokens
+    }
+
+    fn fun_compiler_output(&self) -> Option<&fun::CompilerOutput> {
+        None
     }
 }
 
@@ -517,15 +548,29 @@ impl Executable {
             }
         }
 
+        let externs = vmfiles
+            .values()
+            .filter_map(|vmfile| {
+                if let Some(compiler_output) = vmfile.fun_compiler_output() {
+                    Some(extern_functions(compiler_output))
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
         let tokenized_files = vmfiles
-            .into_values()
+            .values()
             .map(|e| e.to_tokenized_file())
             .collect::<Result<Vec<_>>>()?;
 
         let tokenized_program = TokenizedProgram::from(tokenized_files);
 
         let asm_out_path = self.out_dir.join("out.asm");
-        compile_vm_to_asm(&tokenized_program, &self.runtime, &asm_out_path)
+        compile_vm_to_asm(&tokenized_program, &self.runtime, &externs, &asm_out_path)
             .with_context(|| "Failed compiling vmcode to asm")?;
 
         let obj_out_path = assemble(&self.out_dir, &asm_out_path)?;

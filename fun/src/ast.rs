@@ -3,12 +3,67 @@ use getset::Getters;
 #[derive(Getters)]
 pub struct Module {
     #[getset(get = "pub")]
+    name: String,
+    #[getset(get = "pub")]
     classes: Vec<Node<ClassDecl>>,
+    #[getset(get = "pub")]
+    declare_statements: Vec<DeclareStatement>,
 }
 
 impl Module {
-    pub fn new(classes: Vec<Node<ClassDecl>>) -> Module {
-        Module { classes }
+    pub fn new(
+        name: &str,
+        classes: Vec<Node<ClassDecl>>,
+        declare_statements: Vec<DeclareStatement>,
+    ) -> Module {
+        Module {
+            name: name.to_string(),
+            classes,
+            declare_statements,
+        }
+    }
+}
+
+pub enum DeclareStatement {
+    Module(DeclareModule),
+}
+
+pub struct DeclareModule {
+    name: String,
+    functions: Vec<DeclareFunction>,
+}
+impl DeclareModule {
+    pub fn new(name: String, functions: Vec<DeclareFunction>) -> DeclareModule {
+        DeclareModule { name, functions }
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn functions(&self) -> &[DeclareFunction] {
+        &self.functions
+    }
+}
+
+#[derive(Getters)]
+pub struct DeclareFunction {
+    name: String,
+
+    #[getset(get = "pub")]
+    type_name: String,
+
+    #[getset(get = "pub")]
+    parameters: Vec<Parameter>,
+}
+impl DeclareFunction {
+    pub fn new(name: String, type_name: String, parameters: Vec<Parameter>) -> DeclareFunction {
+        DeclareFunction {
+            name,
+            type_name,
+            parameters,
+        }
+    }
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 

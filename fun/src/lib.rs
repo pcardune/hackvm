@@ -3,17 +3,27 @@ extern crate pest;
 extern crate pest_derive;
 use anyhow::{anyhow, Context, Result};
 
-mod ast;
+pub mod ast;
 mod compiler;
 mod lexer;
 mod parser;
 
+use ast::Module;
 use compiler::ModuleCompiler;
 use hackvm::VMToken;
 use parser::parse_module;
 
-pub fn compile(input: &str) -> Result<Vec<VMToken>> {
+pub struct CompilerOutput {
+    pub vmtokens: Vec<VMToken>,
+    pub ast: Module,
+}
+
+pub fn compile(input: &str) -> Result<CompilerOutput> {
     let module =
         parse_module(input).with_context(|| anyhow!("fun::compile: parse_module failed"))?;
-    ModuleCompiler::new(&module).compile()
+    let vmtokens = ModuleCompiler::new(&module).compile()?;
+    Ok(CompilerOutput {
+        vmtokens,
+        ast: module,
+    })
 }

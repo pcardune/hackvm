@@ -122,8 +122,19 @@ class_decl = {
   class_method* ~
   "}"
 }
+
+function = {
+  "function" ~ identifier ~ parameter_decl ~ ":" ~ type_ref ~ ";"
+}
+
+declare_statement = {
+  "declare" ~ "module" ~ identifier ~ "{" ~
+  function* ~
+  "}"
+}
+
 file = {
   SOI ~
-  class_decl* ~
+  (class_decl | declare_statement)* ~
   EOI
 }

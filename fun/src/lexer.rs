@@ -101,6 +101,9 @@ mod tests {
         let result = FUNLexer::parse(
             Rule::file,
             "
+declare module C {
+    function malloc(size: number):number;
+}
 class Vector {
     
     x: number;

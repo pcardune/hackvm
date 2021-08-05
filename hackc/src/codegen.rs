@@ -276,6 +276,7 @@ impl DataSection {
 pub fn compile_vm_to_asm(
     program: &TokenizedProgram,
     runtime: &Runtime,
+    externs: &[&str],
     output_path: &Path,
 ) -> Result<()> {
     let mut output_file = fs::File::create(output_path).with_context(|| {
@@ -309,21 +310,25 @@ pub fn compile_vm_to_asm(
             name = entry_point
         ),
         None => "
-            global main
-            main:
-                call sys.init
-                ret
+global main
+main:
+    call sys.init
+    ret
             \n"
         .to_string(),
     };
 
+    let externs = externs
+        .iter()
+        .map(|e| format!("extern {}\n", e))
+        .collect::<String>();
+
     let preamble = format!(
         "
-        extern malloc
-        extern putc
-        section .text
-        {}\n",
-        entry
+{}
+section .text
+{}\n",
+        externs, entry
     );
     let indent = |lines: String| -> String {
         lines

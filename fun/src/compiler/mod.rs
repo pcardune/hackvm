@@ -253,8 +253,6 @@ impl<'class> MethodDeclCompiler<'class> {
 
         let mut block_compiler = BlockCompiler::new(self, self.method.block());
         let (num_locals, block_tokens) = block_compiler.compile()?;
-
-        // let num_locals = self.local_names.segment_size(&VMSegment::Local);
         Ok((block_tokens, num_locals))
     }
 

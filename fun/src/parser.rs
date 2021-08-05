@@ -33,7 +33,12 @@ pub fn parse_module(input: &str) -> Result<Module> {
             _ => panic!("Not sure what to do with {:?}", pair),
         }
     }
-    return Ok(Module::new("", classes, declare_statements, statements));
+    return Ok(Module::new(
+        "",
+        classes,
+        declare_statements,
+        Block::new(statements),
+    ));
 }
 
 impl Node<ClassDecl> {
@@ -430,7 +435,7 @@ mod tests {
     #[test]
     fn test_top_level_statements() {
         let module = parse_module("let a:number = 1;").unwrap();
-        assert_eq!(module.statements().len(), 1);
+        assert_eq!(module.block().statements().len(), 1);
     }
 
     #[test]

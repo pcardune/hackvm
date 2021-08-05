@@ -9,7 +9,7 @@ pub struct Module {
     #[getset(get = "pub")]
     declare_statements: Vec<DeclareStatement>,
     #[getset(get = "pub")]
-    statements: Vec<Statement>,
+    block: Block,
 }
 
 impl Module {
@@ -17,13 +17,13 @@ impl Module {
         name: &str,
         classes: Vec<Node<ClassDecl>>,
         declare_statements: Vec<DeclareStatement>,
-        statements: Vec<Statement>,
+        block: Block,
     ) -> Module {
         Module {
             name: name.to_string(),
             classes,
             declare_statements,
-            statements,
+            block,
         }
     }
 }

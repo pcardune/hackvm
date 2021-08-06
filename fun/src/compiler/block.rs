@@ -125,7 +125,7 @@ impl<'block> BlockCompiler<'block> {
                                 .method_compiler
                                 .module_compiler()
                                 .get_object_types()
-                                .get_by_id(left_mem_ref.type_id)
+                                .get(left_mem_ref.type_id)
                                 .expect("wasn't able to get ObjectType from MemRef")
                                 .clone(); // TODO: see about removing this clone?
                             let left_obj_type = match left_obj_type {

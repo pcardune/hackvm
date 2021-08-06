@@ -20,9 +20,11 @@ where
     {
         self.key_map.get(key).copied()
     }
+    #[allow(dead_code)]
     pub fn get_at(&self, index: usize) -> Option<&V> {
         self.items.get(index)
     }
+    #[allow(dead_code)]
     pub fn get_at_mut(&mut self, index: usize) -> Option<&mut V> {
         self.items.get_mut(index)
     }
@@ -35,6 +37,7 @@ where
             .map(|index| self.items.get(index))
             .flatten()
     }
+    #[allow(dead_code)]
     pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
@@ -131,35 +134,38 @@ pub enum Type {
     Object(ObjectType),
 }
 
+impl Type {
+    pub fn object(&self) -> &ObjectType {
+        match self {
+            Self::Object(val) => val,
+            _ => panic!("called `Type::object()` on a `{:?}` value", self),
+        }
+    }
+    pub fn add_field_unchecked(&mut self, name: &str, type_id: TypeId) -> Result<usize> {
+        if let Self::Object(obj) = self {
+            obj.add_field(name, type_id)
+        } else {
+            panic!("add_field() can only be called on object types");
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TypeId(usize);
 
 #[derive(Debug, Default)]
-pub struct TypeTable {
-    types: OrderedMap<String, Type>,
+pub struct TypeArena {
+    types: Vec<Type>,
 }
-impl TypeTable {
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut Type> {
-        self.types.get_mut(name)
+impl TypeArena {
+    pub fn get(&self, id: TypeId) -> Option<&Type> {
+        self.types.get(id.0)
     }
-    #[allow(dead_code)]
-    pub fn get(&self, name: &str) -> Option<&Type> {
-        self.types.get(name)
+    pub fn get_mut(&mut self, id: TypeId) -> Option<&mut Type> {
+        self.types.get_mut(id.0)
     }
-    pub fn get_by_id(&self, id: TypeId) -> Option<&Type> {
-        self.types.get_at(id.0)
-    }
-    pub fn get_by_id_mut(&mut self, id: TypeId) -> Option<&mut Type> {
-        self.types.get_at_mut(id.0)
-    }
-    pub fn add_type(&mut self, name: &str, obj_type: Type) -> Result<TypeId> {
-        let id = self
-            .types
-            .push(name.to_string(), obj_type)
-            .map_err(|_| anyhow!("Type {} already declared", name))?;
-        Ok(TypeId(id))
-    }
-    pub fn id_for_type(&self, name: &str) -> Option<TypeId> {
-        self.types.index_of(name).map(|id| TypeId(id))
+    pub fn add_type(&mut self, obj_type: Type) -> Result<TypeId> {
+        self.types.push(obj_type);
+        Ok(TypeId(self.types.len() - 1))
     }
 }

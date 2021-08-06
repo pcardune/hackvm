@@ -126,6 +126,7 @@ pub struct ConstructorType {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Type {
     Primitive(String),
     Alias(usize),
@@ -135,7 +136,8 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn object(&self) -> &ObjectType {
+    #[allow(dead_code)]
+    fn object(&self) -> &ObjectType {
         match self {
             Self::Object(val) => val,
             _ => panic!("called `Type::object()` on a `{:?}` value", self),

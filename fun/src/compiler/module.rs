@@ -1,6 +1,8 @@
 use anyhow::Context;
 
 use super::*;
+use symbols::HashTree;
+
 mod statics {
     use super::*;
     #[derive(Default)]
@@ -52,8 +54,7 @@ use statics::*;
 pub struct ModuleCompiler<'m> {
     statics_table: StaticsTable,
     types: TypeArena,
-    module_type_id: Option<TypeId>,
-    primitive_types: ObjectType,
+    type_names: HashTree<String, TypeId>,
     module: &'m Module,
 }
 
@@ -64,19 +65,18 @@ impl<'m> ModuleCompiler<'m> {
         // start by adding built-in types
         // TODO: make types support generics and use that
         // instead of number[]
-        let mut primitive_types = ObjectType::new("<primitive>");
+        let mut primitive_types = HashTree::default();
         for type_name in &["number", "boolean", "void", "number[]", "string"] {
             let id = types
                 .add_type(Type::Primitive(type_name.to_string()))
                 .unwrap();
-            primitive_types.add_field(type_name, id).unwrap();
+            primitive_types.insert(type_name.to_string(), id);
         }
 
         ModuleCompiler {
             statics_table: StaticsTable::default(),
             types,
-            module_type_id: None,
-            primitive_types,
+            type_names: HashTree::with_parent(primitive_types),
             module,
         }
     }
@@ -90,27 +90,13 @@ impl<'m> ModuleCompiler<'m> {
     }
 
     pub fn resolve_type(&self, type_name: &str) -> Result<TypeId> {
-        let module_type = self
-            .types
-            .get(self.module_type_id.unwrap())
-            .unwrap()
-            .object();
-
-        match module_type.get_field(type_name) {
-            Some(field) => Ok(*field.type_id()),
-            None => match self.primitive_types.get_field(type_name) {
-                Some(field) => Ok(*field.type_id()),
-                None => Err(anyhow!("{} is not a known type", type_name)),
-            },
+        match self.type_names.get(type_name) {
+            Some(field) => Ok(*field),
+            None => Err(anyhow!("{} is not a known type", type_name)),
         }
     }
 
     pub fn populate_types(&mut self) -> Result<()> {
-        let module_type_id = self
-            .types
-            .add_type(Type::Object(ObjectType::new("<module>")))?;
-        self.module_type_id = Some(module_type_id);
-
         // add empty class types
         let class_types = self
             .module
@@ -120,10 +106,9 @@ impl<'m> ModuleCompiler<'m> {
                 let type_id = self
                     .types
                     .add_type(Type::Object(ObjectType::new(class_decl.data().name())))?;
-                self.types
-                    .get_mut(module_type_id)
-                    .unwrap()
-                    .add_field_unchecked(class_decl.name(), type_id)?;
+
+                self.type_names
+                    .insert(class_decl.name().to_string(), type_id);
 
                 Ok((type_id, class_decl))
             })

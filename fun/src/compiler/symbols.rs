@@ -1,23 +1,27 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
-#[derive(Debug, Default)]
-pub struct HashTree<'p, K, V>
+#[derive(Debug)]
+pub struct HashTree<K, V>
 where
     K: Eq + Hash,
 {
-    parent: Option<&'p HashTree<'p, K, V>>,
+    parent: Option<Box<HashTree<K, V>>>,
     data: HashMap<K, V>,
 }
 
-impl<'p, K, V> HashTree<'p, K, V>
+impl<K, V> HashTree<K, V>
 where
     K: Eq + Hash,
 {
-    pub fn get(&self, k: &K) -> Option<&V> {
+    pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash,
+    {
         let value = self.data.get(k);
         if let Some(value) = value {
             Some(value)
-        } else if let Some(parent) = self.parent {
+        } else if let Some(parent) = self.parent.borrow() {
             parent.get(k)
         } else {
             None
@@ -26,10 +30,22 @@ where
     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
         self.data.insert(k, v)
     }
-    pub fn with_parent(parent: &'p HashTree<K, V>) -> HashTree<'p, K, V> {
+    pub fn with_parent(parent: HashTree<K, V>) -> HashTree<K, V> {
         HashTree {
-            parent: Some(parent),
+            parent: Some(Box::new(parent)),
             data: HashMap::default(),
+        }
+    }
+}
+
+impl<K, V> Default for HashTree<K, V>
+where
+    K: Eq + Hash,
+{
+    fn default() -> Self {
+        HashTree {
+            parent: None,
+            data: HashMap::new(),
         }
     }
 }
@@ -43,7 +59,7 @@ mod tests {
         file_scope.insert("a", 1);
         file_scope.insert("b", 2);
 
-        let mut function_scope = HashTree::with_parent(&file_scope);
+        let mut function_scope = HashTree::with_parent(file_scope);
         assert_eq!(function_scope.get(&"a"), Some(&1));
 
         function_scope.insert("a", 3);

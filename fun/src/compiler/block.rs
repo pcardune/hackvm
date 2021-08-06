@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use hackvm::{VMSegment, VMToken};
 
-use crate::ast::*;
+use crate::{ast::*, compiler::Type};
 
 use super::{
     namespace::{MemRef, Namespace},
@@ -128,6 +128,10 @@ impl<'block> BlockCompiler<'block> {
                                 .get_by_id(left_mem_ref.type_id)
                                 .expect("wasn't able to get ObjectType from MemRef")
                                 .clone(); // TODO: see about removing this clone?
+                            let left_obj_type = match left_obj_type {
+                                Type::Object(t) => t,
+                                _ => todo!(),
+                            };
                             let mut dest = match right {
                                 Term::Identifier(instance_field_name) => {
                                     let instance_field =

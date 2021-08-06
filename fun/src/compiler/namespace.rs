@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use hackvm::{VMSegment, VMToken};
 
+use super::TypeId;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MemRef {
     pub segment: VMSegment,
     pub index: usize,
-    pub type_id: usize,
+    pub type_id: TypeId,
 }
 impl MemRef {
     pub fn as_pop_token(&self) -> VMToken {
@@ -42,7 +44,7 @@ impl Namespace {
         self.offset.insert(*segment, namespace.get_index(segment));
     }
 
-    pub fn register(&mut self, name: &str, segment: &VMSegment, type_id: usize) -> Option<usize> {
+    pub fn register(&mut self, name: &str, segment: &VMSegment, type_id: TypeId) -> Option<usize> {
         if self.names.contains_key(name) {
             None
         } else {

@@ -11,118 +11,13 @@ mod block;
 mod module;
 mod namespace;
 mod symbols;
+mod types;
 
 pub use module::ModuleCompiler;
 
 use namespace::{MemRef, Namespace};
 
-#[derive(Debug, Clone)]
-pub struct OrderedMap<V> {
-    key_map: HashMap<String, usize>,
-    items: Vec<V>,
-}
-impl<V> OrderedMap<V> {
-    pub fn index_of(&self, key: &str) -> Option<usize> {
-        self.key_map.get(key).copied()
-    }
-    pub fn get_at(&self, index: usize) -> Option<&V> {
-        self.items.get(index)
-    }
-    pub fn get(&self, key: &str) -> Option<&V> {
-        self.index_of(key)
-            .map(|index| self.items.get(index))
-            .flatten()
-    }
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut V> {
-        match self.index_of(key) {
-            Some(index) => self.items.get_mut(index),
-            None => None,
-        }
-    }
-    pub fn push(&mut self, key: &str, value: V) -> Result<()> {
-        if self.key_map.contains_key(key) {
-            Err(anyhow!("key {} was already pushed", key))
-        } else {
-            let index = self.items.len();
-            self.items.push(value);
-            self.key_map.insert(key.to_string(), index);
-            Ok(())
-        }
-    }
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-}
-impl<V> Default for OrderedMap<V> {
-    fn default() -> Self {
-        OrderedMap {
-            key_map: HashMap::new(),
-            items: Vec::new(),
-        }
-    }
-}
-
 pub use types::*;
-mod types {
-    use super::*;
-
-    #[derive(Debug, Clone, Getters)]
-    pub struct ObjectTypeField {
-        #[getset(get = "pub")]
-        type_id: usize,
-        #[getset(get = "pub")]
-        index: usize,
-    }
-    #[derive(Debug, Getters, Clone)]
-    pub struct ObjectType {
-        #[getset(get = "pub")]
-        name: String,
-        fields: OrderedMap<ObjectTypeField>,
-    }
-    impl ObjectType {
-        pub fn new(name: &str) -> ObjectType {
-            ObjectType {
-                name: name.to_string(),
-                fields: OrderedMap::default(),
-            }
-        }
-        pub fn get_field(&self, field_name: &str) -> Option<&ObjectTypeField> {
-            self.fields.get(field_name)
-        }
-        pub fn add_field(&mut self, name: &str, type_id: usize) -> Result<()> {
-            let index = self.fields.len();
-            let field = ObjectTypeField { type_id, index };
-            self.fields
-                .push(name, field)
-                .map_err(|_| anyhow!("field {} already declared", name))
-        }
-    }
-
-    #[derive(Debug, Default)]
-    pub struct ObjectTypeTable {
-        types: OrderedMap<ObjectType>,
-    }
-    impl ObjectTypeTable {
-        pub fn get_mut(&mut self, name: &str) -> Option<&mut ObjectType> {
-            self.types.get_mut(name)
-        }
-        #[allow(dead_code)]
-        pub fn get(&self, name: &str) -> Option<&ObjectType> {
-            self.types.get(name)
-        }
-        pub fn get_by_id(&self, id: usize) -> Option<&ObjectType> {
-            self.types.get_at(id)
-        }
-        pub fn add_type(&mut self, name: &str, obj_type: ObjectType) -> Result<()> {
-            self.types
-                .push(name, obj_type)
-                .map_err(|_| anyhow!("Type {} already declared", name))
-        }
-        pub fn id_for_type(&self, name: &str) -> Option<usize> {
-            self.types.index_of(name)
-        }
-    }
-}
 
 mod class {
     use anyhow::Context;
@@ -647,7 +542,7 @@ mod tests {
         let module = parse_module(
             "
             class Counter {
-                static create(): Vector {
+                static create(): Counter {
                     return new Counter();
                 }
                 n: number;

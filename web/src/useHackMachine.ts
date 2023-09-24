@@ -48,7 +48,7 @@ export default function useHackMachine(
     const computeInterval = safeInterval(() => {
       machine?.tick(speed);
     }, 0);
-    let onTickInterval: NodeJS.Timeout;
+    let onTickInterval: ReturnType<typeof safeInterval>;
     if (onTick) {
       onTickInterval = safeInterval(
         () => onTick(machine, new Date().getTime() - startTime),

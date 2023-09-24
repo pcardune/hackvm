@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HashRouter as Router, Switch, Route, Link } from "react-router-dom";
+import { HashRouter as Router, Routes, Route, Link } from "react-router-dom";
 import Navbar from "react-bootstrap/Navbar";
 import NavDropdown from "react-bootstrap/NavDropdown";
 import Nav from "react-bootstrap/Nav";
@@ -53,17 +53,11 @@ function App() {
           </Nav>
         </Navbar.Collapse>
       </Navbar>
-      <Switch>
-        <Route path="/emulator/:demoId">
-          <EmulatorPage />
-        </Route>
-        <Route path="/emulator">
-          <EmulatorPage />
-        </Route>
-        <Route path="/">
-          <AboutPage />
-        </Route>
-      </Switch>
+      <Routes>
+        <Route path="/emulator/:demoId" element={<EmulatorPage />} />
+        <Route path="/emulator" element={<EmulatorPage />} />
+        <Route path="/" element={<AboutPage />} />
+      </Routes>
     </Router>
   );
 }

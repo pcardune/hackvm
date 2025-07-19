@@ -11,5 +11,5 @@ class Sys {
 
   static halt(): void {}
   static wait(): void {}
-  static error(): void {}
+  static error(code: number): void {}
 }

@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
-    "noLib": true,
+    "lib": ["ES6"],
+    // "noLib": true,
     "strict": true
   },
-  "files": ["Sys.fun", "Memory.fun"]
+  "files": ["Sys.fun", "Memory.fun", "Keyboard.fun", "Screen.fun"]
 }

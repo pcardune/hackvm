@@ -12,6 +12,6 @@ declare class Output {
   static println(): void;
 }
 
-declare class Screen {
-  static clearScreen(): void;
-}
+// declare class Screen {
+//   static clearScreen(): void;
+// }

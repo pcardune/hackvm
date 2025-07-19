@@ -1,3 +1,5 @@
+use std::mem;
+
 use anyhow::Context;
 
 use super::*;
@@ -51,10 +53,44 @@ mod statics {
 }
 use statics::*;
 
+#[derive(Debug)]
+pub enum Symbol {
+    Virtual(HashMap<String, Symbol>),
+    Mem(MemRef),
+}
+
+impl Symbol {
+    pub fn resolve(&self, names: &[&str]) -> Result<MemRef> {
+        let mut s = self;
+        let names = names.iter().peekable();
+        loop {
+            match s {
+                Symbol::Mem(mem_ref) => {
+                    if names.next().is_some() {
+                        return Err(anyhow!("Arrived at bound variable before finishing descent!"))
+                    }
+                    return Ok(*mem_ref);
+                }
+                Symbol::Virtual(map) => {
+                    match names.next() {
+                        Some(name) => {
+                            s = map.get(*name).ok_or_else(|| anyhow!(""))?;
+                        },
+                        None => {
+                            return Err(anyhow!("Ran out of names to traverse before reaching MemRef"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct ModuleCompiler<'m> {
     statics_table: StaticsTable,
     types: TypeArena,
     type_names: HashTree<String, TypeId>,
+    symbols: HashTree<String, Symbol>,
     module: &'m Module,
 }
 
@@ -78,11 +114,8 @@ impl<'m> ModuleCompiler<'m> {
             types,
             type_names: HashTree::with_parent(primitive_types),
             module,
+            symbols: HashTree::default(),
         }
-    }
-
-    pub fn get_static_field(&self, class_name: &str, field_name: &str) -> Option<MemRef> {
-        self.statics_table.get(class_name, field_name)
     }
 
     pub fn get_object_types(&self) -> &TypeArena {
@@ -129,17 +162,10 @@ impl<'m> ModuleCompiler<'m> {
                     )
                 })?;
                 match field.data().scope() {
-                    Scope::Static => {
-                        if let Some(_) =
-                            self.statics_table
-                                .insert(class_decl.data().name(), name, field_type_id)
-                        {
-                            return Err(anyhow!("Static field \"{}\" declared twice", name));
-                        }
-                    }
                     Scope::Instance => {
                         fields_to_add.push((name, field_type_id));
                     }
+                    _ => {}
                 }
             }
             for method in class_decl.methods() {
@@ -162,8 +188,47 @@ impl<'m> ModuleCompiler<'m> {
         Ok(())
     }
 
+    fn map_statics(&mut self) {
+        let mut index: usize = 0;
+        for class_decl in self.module.classes() {
+            let mut static_map: HashMap<String, Symbol> = HashMap::new();
+
+            for field in class_decl.fields() {
+                if field.data().scope() == &Scope::Static {
+                    let field_type_id = self.resolve_type(field.data().type_name()).unwrap();
+
+                    let mem_ref = MemRef {
+                        segment: VMSegment::Static,
+                        index,
+                        type_id: field_type_id,
+                    };
+                    static_map.insert(field.data().name().to_string(), Symbol::Mem(mem_ref));
+                    index += 1;
+
+                    self.statics_table.insert(
+                        class_decl.data().name(),
+                        field.data().name(),
+                        field_type_id,
+                    );
+                }
+            }
+            self.symbols
+                .insert(class_decl.name().to_string(), Symbol::Virtual(static_map));
+        }
+    }
+
+    pub fn get_static_field(&self, class_name: &str, field_name: &str) -> Option<MemRef> {
+        self.symbols.get(class_name).map(|s| match s {
+            Symbol::Virtual(fields) => {
+
+            }
+        })
+        self.statics_table.get(class_name, field_name)
+    }
+
     pub fn compile(mut self) -> Result<Vec<VMToken>> {
         self.populate_types()?;
+        self.map_statics();
         let mut class_compilers = self
             .module
             .classes()

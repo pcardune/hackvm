@@ -21,6 +21,12 @@ class Main {
     }
     Output.println();
     Output.printString('How about that?');
+    Output.println();
+    Output.printString('8/16 = ');
+    Output.printInt(8 / 16);
+
+    Screen.drawRectangle(0, 100, 200, 120);
+    Screen.drawRectangle(8, 121, 200, 140);
   }
 }
 

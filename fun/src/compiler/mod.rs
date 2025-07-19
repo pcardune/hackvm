@@ -56,6 +56,12 @@ mod class {
             self.class_decl.name()
         }
 
+        pub fn get_type_id(&self) -> TypeId {
+            self.module_compiler
+                .resolve_type(self.get_class_name())
+                .unwrap()
+        }
+
         pub fn compile(&mut self) -> Result<Vec<VMToken>> {
             self.instance_names.clear();
             for field in self.class_decl.fields() {
@@ -93,6 +99,7 @@ mod class {
 use class::ClassDeclCompiler;
 
 use self::block::BlockCompiler;
+use self::symbols::HashTree;
 pub struct MethodDeclCompiler<'class> {
     class_compiler: &'class ClassDeclCompiler<'class>,
     method: &'class MethodDecl,
@@ -129,7 +136,15 @@ impl<'class> MethodDeclCompiler<'class> {
     }
 
     fn start_method(&mut self) -> Result<(Vec<VMToken>, usize)> {
+        let mut names: HashTree<String, TypeId> = HashTree::default();
+        names.insert("this".to_string(), self.class_compiler.get_type_id());
+
         for parameter in self.method.parameters() {
+            names.insert(
+                parameter.name().to_string(),
+                self.module_compiler().resolve_type(parameter.type_name())?,
+            );
+
             self.local_names.register(
                 parameter.name(),
                 &VMSegment::Argument,

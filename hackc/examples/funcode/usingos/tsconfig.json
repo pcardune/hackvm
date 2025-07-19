@@ -3,5 +3,5 @@
     "lib": ["ES6"],
     "strict": true
   },
-  "files": ["Main.fun"]
+  "files": ["Main.fun", "../OS/Screen.fun"]
 }
